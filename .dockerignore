@@ -1,0 +1,63 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment variables (use Cloud Run env vars instead)
+.env
+.env.local
+.env.example
+
+# Outputs and logs
+outputs/
+*.log
+server.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Claude cache
+.claude/
+
+# Test files
+test_*.py
+
+# Temporary files
+*.tmp
+*.bak
+
+# Documentation
+README.md
+*.md
+!CLAUDE.md
+
+# Docker files (don't need to copy into container)
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+cloudbuild.yaml
+
+# Development scripts
+Makefile
