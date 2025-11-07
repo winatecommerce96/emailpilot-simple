@@ -1,0 +1,67 @@
+# Client Configuration for EmailPilot Simple
+#
+# This file defines the 7 Klaviyo clients and their settings
+
+clients:
+  rogue-creamery:
+    display_name: "Rogue Creamery"
+    firestore_doc_id: "rogue_creamery"
+    revenue_goal_monthly: 50000
+    send_cap_email: 120000
+    send_cap_sms: 5000
+    timezone: "America/Los_Angeles"
+    mcp_account: "Rogue_Creamery_Klaviyo"
+
+  vlasic:
+    display_name: "Vlasic"
+    firestore_doc_id: "vlasic"
+    revenue_goal_monthly: 30000
+    send_cap_email: 80000
+    send_cap_sms: 3000
+    timezone: "America/New_York"
+    mcp_account: "Vlasic_Klaviyo"
+
+  colorado-hemp-honey:
+    display_name: "Colorado Hemp Honey"
+    firestore_doc_id: "colorado_hemp_honey"
+    revenue_goal_monthly: 25000
+    send_cap_email: 60000
+    send_cap_sms: 2500
+    timezone: "America/Denver"
+    mcp_account: "Colorado_Hemp_Honey_Klaviyo"
+
+  wheelchair-getaways:
+    display_name: "Wheelchair Getaways"
+    firestore_doc_id: "wheelchair_getaways"
+    revenue_goal_monthly: 40000
+    send_cap_email: 100000
+    send_cap_sms: 4000
+    timezone: "America/Los_Angeles"
+    mcp_account: "Wheelchair_Getaways_Klaviyo"
+
+  milagro:
+    display_name: "Milagro"
+    firestore_doc_id: "milagro"
+    revenue_goal_monthly: 20000
+    send_cap_email: 50000
+    send_cap_sms: 2000
+    timezone: "America/Chicago"
+    mcp_account: "Milagro_Klaviyo"
+
+  faso:
+    display_name: "FASO"
+    firestore_doc_id: "faso"
+    revenue_goal_monthly: 35000
+    send_cap_email: 90000
+    send_cap_sms: 3500
+    timezone: "America/Phoenix"
+    mcp_account: "FASO_Klaviyo"
+
+  chris-bean:
+    display_name: "Chris Bean Coffee"
+    firestore_doc_id: "chris_bean"
+    revenue_goal_monthly: 28000
+    send_cap_email: 70000
+    send_cap_sms: 3000
+    timezone: "America/New_York"
+    mcp_account: "Chris_Bean_Klaviyo"

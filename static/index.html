@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EmailPilot Simple - Workflow Manager</title>
+
+    <!-- TailwindCSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Alpine.js for reactivity -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <!-- Prism.js for syntax highlighting -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+
+    <style>
+        /* Glass-card styling */
+        .glass-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 16px;
+            padding: 2rem;
+        }
+
+        .glass-card-dark {
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 1.5rem;
+        }
+
+        /* Background gradient */
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        /* Tab styling */
+        .tab-active {
+            background: rgba(255, 255, 255, 0.2);
+            border-bottom: 2px solid white;
+        }
+
+        /* Debug log styling */
+        .debug-log {
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+        }
+
+        .log-info { color: #60a5fa; }
+        .log-success { color: #34d399; }
+        .log-warning { color: #fbbf24; }
+        .log-error { color: #f87171; }
+        .log-request { color: #a78bfa; }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+    </style>
+</head>
+<body class="text-white p-8" x-data="appManager()">
+
+    <!-- Header -->
+    <div class="glass-card mb-8">
+        <h1 class="text-4xl font-bold mb-2">📧 EmailPilot Simple</h1>
+        <p class="text-white/80">Workflow Manager & Data Inspector</p>
+        <div class="mt-4 flex gap-4 text-sm">
+            <div>
+                <span class="text-white/60">Status:</span>
+                <span :class="{'text-green-400': connected, 'text-red-400': !connected}"
+                      x-text="connected ? '🟢 Connected' : '🔴 Disconnected'"></span>
+            </div>
+            <div>
+                <span class="text-white/60">Last Activity:</span>
+                <span x-text="lastActivity"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Navigation -->
+    <div class="glass-card mb-8">
+        <div class="flex gap-4 overflow-x-auto">
+            <button
+                @click="activeTab = 'workflow'"
+                :class="{'tab-active': activeTab === 'workflow'}"
+                class="px-6 py-3 rounded-t-lg transition-all hover:bg-white/10 whitespace-nowrap">
+                🚀 Workflow
+            </button>
+            <button
+                @click="activeTab = 'prompts'"
+                :class="{'tab-active': activeTab === 'prompts'}"
+                class="px-6 py-3 rounded-t-lg transition-all hover:bg-white/10 whitespace-nowrap">
+                📝 Prompts
+            </button>
+            <button
+                @click="activeTab = 'rag'"
+                :class="{'tab-active': activeTab === 'rag'}"
+                class="px-6 py-3 rounded-t-lg transition-all hover:bg-white/10 whitespace-nowrap">
+                📚 RAG Data
+            </button>
+            <button
+                @click="activeTab = 'mcp'"
+                :class="{'tab-active': activeTab === 'mcp'}"
+                class="px-6 py-3 rounded-t-lg transition-all hover:bg-white/10 whitespace-nowrap">
+                🔌 MCP Data
+            </button>
+            <button
+                @click="activeTab = 'outputs'"
+                :class="{'tab-active': activeTab === 'outputs'}"
+                class="px-6 py-3 rounded-t-lg transition-all hover:bg-white/10 whitespace-nowrap">
+                📄 Outputs
+            </button>
+            <button
+                @click="activeTab = 'cache'"
+                :class="{'tab-active': activeTab === 'cache'}"
+                class="px-6 py-3 rounded-t-lg transition-all hover:bg-white/10 whitespace-nowrap">
+                💾 Cache
+            </button>
+        </div>
+    </div>
+
+    <!-- Content Area -->
+    <div class="glass-card mb-8 min-h-[600px]">
+
+        <!-- Workflow Tab -->
+        <div x-show="activeTab === 'workflow'" x-cloak>
+            <h2 class="text-2xl font-bold mb-6">Workflow Executor</h2>
+
+            <!-- Workflow Configuration -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div>
+                    <label class="block mb-2 text-sm">Client Name</label>
+                    <input
+                        type="text"
+                        x-model="workflowConfig.clientName"
+                        placeholder="e.g., rogue-creamery"
+                        class="w-full px-4 py-2 rounded bg-white/10 border border-white/20 focus:border-white/40 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block mb-2 text-sm">Start Date</label>
+                    <input
+                        type="date"
+                        x-model="workflowConfig.startDate"
+                        class="w-full px-4 py-2 rounded bg-white/10 border border-white/20 focus:border-white/40 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block mb-2 text-sm">End Date</label>
+                    <input
+                        type="date"
+                        x-model="workflowConfig.endDate"
+                        class="w-full px-4 py-2 rounded bg-white/10 border border-white/20 focus:border-white/40 focus:outline-none">
+                </div>
+            </div>
+
+            <!-- Workflow Actions -->
+            <div class="flex gap-4 mb-6">
+                <button
+                    @click="runWorkflow('validate')"
+                    :disabled="workflowRunning"
+                    class="px-6 py-3 bg-blue-500 hover:bg-blue-600 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+                    ✓ Validate Inputs
+                </button>
+                <button
+                    @click="runWorkflow('stage-1')"
+                    :disabled="workflowRunning"
+                    class="px-6 py-3 bg-green-500 hover:bg-green-600 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+                    1️⃣ Run Stage 1 (Planning)
+                </button>
+                <button
+                    @click="runWorkflow('stage-2')"
+                    :disabled="workflowRunning"
+                    class="px-6 py-3 bg-yellow-500 hover:bg-yellow-600 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+                    2️⃣ Run Stage 2 (Structuring)
+                </button>
+                <button
+                    @click="runWorkflow('stage-3')"
+                    :disabled="workflowRunning"
+                    class="px-6 py-3 bg-purple-500 hover:bg-purple-600 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+                    3️⃣ Run Stage 3 (Briefs)
+                </button>
+                <button
+                    @click="runWorkflow('full')"
+                    :disabled="workflowRunning"
+                    class="px-6 py-3 bg-pink-500 hover:bg-pink-600 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+                    🚀 Run Full Workflow
+                </button>
+            </div>
+
+            <!-- Workflow Progress -->
+            <div x-show="workflowRunning" class="glass-card-dark mb-6">
+                <div class="flex items-center gap-4">
+                    <div class="animate-spin h-8 w-8 border-4 border-white border-t-transparent rounded-full"></div>
+                    <div>
+                        <p class="font-semibold" x-text="workflowStatus.stage"></p>
+                        <p class="text-sm text-white/60" x-text="workflowStatus.message"></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Workflow Results -->
+            <div x-show="workflowResult" class="glass-card-dark">
+                <h3 class="text-xl font-bold mb-4">Results</h3>
+                <div x-show="workflowResult?.success" class="mb-4">
+                    <p class="text-green-400 font-semibold">✅ Workflow completed successfully!</p>
+                </div>
+                <div x-show="!workflowResult?.success && workflowResult" class="mb-4">
+                    <p class="text-red-400 font-semibold">❌ Workflow failed</p>
+                    <p class="text-sm mt-2" x-text="workflowResult?.error"></p>
+                </div>
+                <pre class="overflow-x-auto text-sm" x-text="JSON.stringify(workflowResult, null, 2)"></pre>
+            </div>
+        </div>
+
+        <!-- Prompts Tab -->
+        <div x-show="activeTab === 'prompts'" x-cloak>
+            <h2 class="text-2xl font-bold mb-6">Prompt Editor</h2>
+
+            <!-- Prompt Selection -->
+            <div class="mb-6">
+                <label class="block mb-2 text-sm">Select Prompt</label>
+                <select
+                    x-model="selectedPrompt"
+                    @change="loadPrompt()"
+                    class="w-full px-4 py-2 rounded bg-white/10 border border-white/20 focus:border-white/40 focus:outline-none">
+                    <option value="">-- Select a prompt --</option>
+                    <option value="planning">Planning (v5.1.0)</option>
+                    <option value="structuring">Calendar Structuring (v1.2.2)</option>
+                    <option value="briefs">Brief Generation (v2.2.0)</option>
+                </select>
+            </div>
+
+            <!-- Prompt Editor -->
+            <div x-show="promptData" class="space-y-4">
+                <div>
+                    <label class="block mb-2 text-sm">Prompt Content (YAML)</label>
+                    <textarea
+                        x-model="promptData.content"
+                        rows="20"
+                        class="w-full px-4 py-2 rounded bg-black/30 border border-white/20 focus:border-white/40 focus:outline-none font-mono text-sm"
+                        spellcheck="false"></textarea>
+                </div>
+
+                <div class="flex gap-4">
+                    <button
+                        @click="savePrompt()"
+                        class="px-6 py-3 bg-green-500 hover:bg-green-600 rounded-lg font-semibold">
+                        💾 Save Changes
+                    </button>
+                    <button
+                        @click="loadPrompt()"
+                        class="px-6 py-3 bg-gray-500 hover:bg-gray-600 rounded-lg font-semibold">
+                        🔄 Reload
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- RAG Data Tab -->
+        <div x-show="activeTab === 'rag'" x-cloak>
+            <h2 class="text-2xl font-bold mb-6">RAG Data Viewer</h2>
+
+            <!-- Client Selection -->
+            <div class="mb-6">
+                <label class="block mb-2 text-sm">Client Name</label>
+                <input
+                    type="text"
+                    x-model="ragClient"
+                    placeholder="e.g., rogue-creamery"
+                    @keyup.enter="loadRagData()"
+                    class="w-full px-4 py-2 rounded bg-white/10 border border-white/20 focus:border-white/40 focus:outline-none">
+                <button
+                    @click="loadRagData()"
+                    class="mt-2 px-6 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg font-semibold">
+                    📚 Load RAG Data
+                </button>
+            </div>
+
+            <!-- RAG Data Display -->
+            <div x-show="ragData" class="glass-card-dark">
+                <h3 class="text-xl font-bold mb-4">Brand Documents</h3>
+                <pre class="overflow-x-auto text-sm" x-text="JSON.stringify(ragData, null, 2)"></pre>
+            </div>
+        </div>
+
+        <!-- MCP Data Tab -->
+        <div x-show="activeTab === 'mcp'" x-cloak>
+            <h2 class="text-2xl font-bold mb-6">MCP Data Viewer</h2>
+
+            <!-- MCP Configuration -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div>
+                    <label class="block mb-2 text-sm">Client Name</label>
+                    <input
+                        type="text"
+                        x-model="mcpConfig.clientName"
+                        placeholder="e.g., rogue-creamery"
+                        class="w-full px-4 py-2 rounded bg-white/10 border border-white/20 focus:border-white/40 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block mb-2 text-sm">Start Date</label>
+                    <input
+                        type="date"
+                        x-model="mcpConfig.startDate"
+                        class="w-full px-4 py-2 rounded bg-white/10 border border-white/20 focus:border-white/40 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block mb-2 text-sm">End Date</label>
+                    <input
+                        type="date"
+                        x-model="mcpConfig.endDate"
+                        class="w-full px-4 py-2 rounded bg-white/10 border border-white/20 focus:border-white/40 focus:outline-none">
+                </div>
+            </div>
+
+            <button
+                @click="loadMcpData()"
+                class="mb-6 px-6 py-3 bg-blue-500 hover:bg-blue-600 rounded-lg font-semibold">
+                🔌 Fetch MCP Data
+            </button>
+
+            <!-- MCP Data Display -->
+            <div x-show="mcpData">
+                <div class="grid grid-cols-2 gap-4 mb-6">
+                    <button
+                        @click="mcpView = 'segments'"
+                        :class="{'bg-white/20': mcpView === 'segments'}"
+                        class="px-4 py-2 rounded-lg hover:bg-white/10">
+                        Segments (<span x-text="mcpData?.segments?.length || 0"></span>)
+                    </button>
+                    <button
+                        @click="mcpView = 'campaigns'"
+                        :class="{'bg-white/20': mcpView === 'campaigns'}"
+                        class="px-4 py-2 rounded-lg hover:bg-white/10">
+                        Campaigns (<span x-text="mcpData?.campaigns?.length || 0"></span>)
+                    </button>
+                    <button
+                        @click="mcpView = 'campaign_report'"
+                        :class="{'bg-white/20': mcpView === 'campaign_report'}"
+                        class="px-4 py-2 rounded-lg hover:bg-white/10">
+                        Campaign Report
+                    </button>
+                    <button
+                        @click="mcpView = 'flows'"
+                        :class="{'bg-white/20': mcpView === 'flows'}"
+                        class="px-4 py-2 rounded-lg hover:bg-white/10">
+                        Flows (<span x-text="mcpData?.flows?.length || 0"></span>)
+                    </button>
+                </div>
+
+                <div class="glass-card-dark">
+                    <h3 class="text-xl font-bold mb-4" x-text="mcpView.toUpperCase()"></h3>
+                    <pre class="overflow-x-auto text-sm" x-text="JSON.stringify(mcpData?.[mcpView], null, 2)"></pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Outputs Tab -->
+        <div x-show="activeTab === 'outputs'" x-cloak>
+            <h2 class="text-2xl font-bold mb-6">Workflow Outputs</h2>
+
+            <!-- Output Selection -->
+            <div class="mb-6">
+                <label class="block mb-2 text-sm">Select Output</label>
+                <select
+                    x-model="selectedOutput"
+                    @change="loadOutput()"
+                    class="w-full px-4 py-2 rounded bg-white/10 border border-white/20 focus:border-white/40 focus:outline-none">
+                    <option value="">-- Select an output --</option>
+                    <option value="latest-planning">Latest Planning Output</option>
+                    <option value="latest-calendar">Latest Calendar JSON</option>
+                    <option value="latest-briefs">Latest Execution Briefs</option>
+                </select>
+            </div>
+
+            <!-- Output Display -->
+            <div x-show="outputData" class="glass-card-dark">
+                <pre class="overflow-x-auto text-sm" x-text="outputData"></pre>
+            </div>
+        </div>
+
+        <!-- Cache Tab -->
+        <div x-show="activeTab === 'cache'" x-cloak>
+            <h2 class="text-2xl font-bold mb-6">Cache Inspector</h2>
+
+            <div class="flex gap-4 mb-6">
+                <button
+                    @click="loadCache()"
+                    class="px-6 py-3 bg-blue-500 hover:bg-blue-600 rounded-lg font-semibold">
+                    🔄 Refresh Cache View
+                </button>
+                <button
+                    @click="clearCache()"
+                    class="px-6 py-3 bg-red-500 hover:bg-red-600 rounded-lg font-semibold">
+                    🗑️ Clear Cache
+                </button>
+            </div>
+
+            <!-- Cache Display -->
+            <div x-show="cacheData" class="glass-card-dark">
+                <h3 class="text-xl font-bold mb-4">Cached Entries</h3>
+                <div class="mb-4">
+                    <p>Total entries: <span x-text="Object.keys(cacheData || {}).length"></span></p>
+                </div>
+                <pre class="overflow-x-auto text-sm" x-text="JSON.stringify(cacheData, null, 2)"></pre>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Debug Console -->
+    <div class="glass-card">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl font-bold">🐛 Debug Console</h3>
+            <div class="flex gap-2">
+                <button
+                    @click="debugLogs = []"
+                    class="px-4 py-2 bg-red-500/50 hover:bg-red-500/70 rounded-lg text-sm">
+                    Clear
+                </button>
+                <button
+                    @click="exportDebugLogs()"
+                    class="px-4 py-2 bg-blue-500/50 hover:bg-blue-500/70 rounded-lg text-sm">
+                    Export
+                </button>
+            </div>
+        </div>
+        <div class="glass-card-dark max-h-96 overflow-y-auto debug-log">
+            <template x-for="log in debugLogs.slice().reverse()" :key="log.id">
+                <div class="mb-2 pb-2 border-b border-white/10">
+                    <span class="text-white/40 text-xs" x-text="log.timestamp"></span>
+                    <span :class="`log-${log.type}`" x-text="log.message"></span>
+                    <div x-show="log.data" class="mt-1 text-xs text-white/60 ml-4">
+                        <pre x-text="JSON.stringify(log.data, null, 2)"></pre>
+                    </div>
+                </div>
+            </template>
+            <div x-show="debugLogs.length === 0" class="text-white/40 text-sm">
+                No debug logs yet...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function appManager() {
+            return {
+                // Connection state
+                connected: false,
+                lastActivity: 'Never',
+
+                // Tab management
+                activeTab: 'workflow',
+
+                // Workflow state
+                workflowConfig: {
+                    clientName: 'rogue-creamery',
+                    startDate: new Date().toISOString().split('T')[0],
+                    endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+                },
+                workflowRunning: false,
+                workflowStatus: {
+                    stage: '',
+                    message: ''
+                },
+                workflowResult: null,
+
+                // Prompts state
+                selectedPrompt: '',
+                promptData: null,
+
+                // RAG state
+                ragClient: 'rogue-creamery',
+                ragData: null,
+
+                // MCP state
+                mcpConfig: {
+                    clientName: 'rogue-creamery',
+                    startDate: new Date().toISOString().split('T')[0],
+                    endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+                },
+                mcpData: null,
+                mcpView: 'segments',
+
+                // Outputs state
+                selectedOutput: '',
+                outputData: null,
+
+                // Cache state
+                cacheData: null,
+
+                // Debug logs
+                debugLogs: [],
+                debugCounter: 0,
+
+                // Initialize
+                init() {
+                    this.debugLog('Application initialized', 'info');
+                    this.checkConnection();
+                },
+
+                // Debug logging
+                debugLog(message, type = 'info', data = null) {
+                    this.debugCounter++;
+                    const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+                    this.debugLogs.push({
+                        id: this.debugCounter,
+                        timestamp,
+                        message,
+                        type,
+                        data
+                    });
+                    this.lastActivity = timestamp;
+                },
+
+                exportDebugLogs() {
+                    const blob = new Blob([JSON.stringify(this.debugLogs, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `debug-logs-${Date.now()}.json`;
+                    a.click();
+                    this.debugLog('Debug logs exported', 'success');
+                },
+
+                // API calls
+                async apiCall(endpoint, data = {}, method = 'POST') {
+                    const url = `/api${endpoint}`;
+                    const requestId = Date.now();
+
+                    this.debugLog(`📤 API Request [${requestId}]`, 'request', { url, method, body: data });
+
+                    try {
+                        const response = await fetch(url, {
+                            method,
+                            headers: { 'Content-Type': 'application/json' },
+                            body: method !== 'GET' ? JSON.stringify(data) : undefined
+                        });
+
+                        const result = await response.json();
+
+                        if (!response.ok) {
+                            this.debugLog(`❌ API Error [${requestId}]`, 'error', result);
+                            throw new Error(result.error || 'API request failed');
+                        }
+
+                        this.debugLog(`✅ API Success [${requestId}]`, 'success', result);
+                        return result;
+
+                    } catch (error) {
+                        this.debugLog(`🚨 Network Error [${requestId}]`, 'error', error.message);
+                        throw error;
+                    }
+                },
+
+                // Connection check
+                async checkConnection() {
+                    try {
+                        await this.apiCall('/health', {}, 'GET');
+                        this.connected = true;
+                        this.debugLog('🟢 Connected to backend', 'success');
+                    } catch (error) {
+                        this.connected = false;
+                        this.debugLog('🔴 Backend connection failed', 'error');
+                    }
+                },
+
+                // Workflow methods
+                async runWorkflow(stage) {
+                    this.workflowRunning = true;
+                    this.workflowResult = null;
+
+                    const stages = {
+                        'validate': 'Validating inputs',
+                        'stage-1': 'Running Stage 1: Planning',
+                        'stage-2': 'Running Stage 2: Calendar Structuring',
+                        'stage-3': 'Running Stage 3: Brief Generation',
+                        'full': 'Running full workflow'
+                    };
+
+                    this.workflowStatus = {
+                        stage: stages[stage],
+                        message: 'Processing...'
+                    };
+
+                    try {
+                        const result = await this.apiCall('/workflow/run', {
+                            stage,
+                            ...this.workflowConfig
+                        });
+
+                        this.workflowResult = result;
+                        this.debugLog(`Workflow ${stage} completed`, 'success', result);
+
+                    } catch (error) {
+                        this.workflowResult = {
+                            success: false,
+                            error: error.message
+                        };
+                        this.debugLog(`Workflow ${stage} failed`, 'error', error);
+
+                    } finally {
+                        this.workflowRunning = false;
+                    }
+                },
+
+                // Prompt methods
+                async loadPrompt() {
+                    if (!this.selectedPrompt) return;
+
+                    try {
+                        const result = await this.apiCall(`/prompts/${this.selectedPrompt}`, {}, 'GET');
+                        this.promptData = result.data;
+                        this.debugLog(`Loaded prompt: ${this.selectedPrompt}`, 'success');
+                    } catch (error) {
+                        this.debugLog(`Failed to load prompt`, 'error', error);
+                    }
+                },
+
+                async savePrompt() {
+                    if (!this.selectedPrompt || !this.promptData) return;
+
+                    try {
+                        await this.apiCall(`/prompts/${this.selectedPrompt}`, this.promptData, 'PUT');
+                        this.debugLog(`Saved prompt: ${this.selectedPrompt}`, 'success');
+                        alert('Prompt saved successfully!');
+                    } catch (error) {
+                        this.debugLog(`Failed to save prompt`, 'error', error);
+                        alert('Failed to save prompt: ' + error.message);
+                    }
+                },
+
+                // RAG methods
+                async loadRagData() {
+                    if (!this.ragClient) return;
+
+                    try {
+                        const result = await this.apiCall(`/rag/data`, { clientName: this.ragClient });
+                        this.ragData = result.data;
+                        this.debugLog(`Loaded RAG data for ${this.ragClient}`, 'success');
+                    } catch (error) {
+                        this.debugLog(`Failed to load RAG data`, 'error', error);
+                    }
+                },
+
+                // MCP methods
+                async loadMcpData() {
+                    try {
+                        const result = await this.apiCall(`/mcp/data`, this.mcpConfig);
+                        this.mcpData = result.data;
+                        this.debugLog(`Loaded MCP data for ${this.mcpConfig.clientName}`, 'success');
+                    } catch (error) {
+                        this.debugLog(`Failed to load MCP data`, 'error', error);
+                    }
+                },
+
+                // Output methods
+                async loadOutput() {
+                    if (!this.selectedOutput) return;
+
+                    try {
+                        const result = await this.apiCall(`/outputs/${this.selectedOutput}`, {}, 'GET');
+                        this.outputData = JSON.stringify(result.data, null, 2);
+                        this.debugLog(`Loaded output: ${this.selectedOutput}`, 'success');
+                    } catch (error) {
+                        this.debugLog(`Failed to load output`, 'error', error);
+                    }
+                },
+
+                // Cache methods
+                async loadCache() {
+                    try {
+                        const result = await this.apiCall(`/cache`, {}, 'GET');
+                        this.cacheData = result.data;
+                        this.debugLog(`Loaded cache data`, 'success');
+                    } catch (error) {
+                        this.debugLog(`Failed to load cache`, 'error', error);
+                    }
+                },
+
+                async clearCache() {
+                    if (!confirm('Are you sure you want to clear the cache?')) return;
+
+                    try {
+                        await this.apiCall(`/cache`, {}, 'DELETE');
+                        this.cacheData = null;
+                        this.debugLog(`Cache cleared`, 'success');
+                        alert('Cache cleared successfully!');
+                    } catch (error) {
+                        this.debugLog(`Failed to clear cache`, 'error', error);
+                        alert('Failed to clear cache: ' + error.message);
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>

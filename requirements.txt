@@ -1,0 +1,26 @@
+# EmailPilot Simple - Calendar Generation Workflow
+# Python 3.10+ required
+
+# Claude API Client
+anthropic>=0.18.0
+
+# YAML parsing for prompt configuration
+pyyaml>=6.0
+
+# Async HTTP client for MCP service communication
+httpx>=0.25.0
+
+# Google Cloud Firestore for client metadata
+google-cloud-firestore>=2.13.0
+
+# Google Cloud Secret Manager for per-client API keys
+google-cloud-secret-manager>=2.16.0
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# FastAPI web framework
+fastapi>=0.104.0
+
+# Uvicorn ASGI server
+uvicorn[standard]>=0.24.0
