@@ -440,6 +440,75 @@ class MCPClient:
 
         return {"data": {}}
 
+    def _validate_mcp_data(
+        self,
+        mcp_data: Dict[str, Any],
+        client_name: str,
+        start_date: str,
+        end_date: str
+    ) -> None:
+        """
+        Validate that MCP data contains REAL data, not empty structures.
+
+        This ensures the workflow cannot proceed with empty or missing Klaviyo data,
+        preventing generation of calendars based solely on industry benchmarks.
+
+        Args:
+            mcp_data: Dictionary containing fetched MCP data
+            client_name: Client slug (e.g., "rogue-creamery")
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+
+        Raises:
+            ValueError: If critical data is missing or invalid
+        """
+        errors = []
+        warnings = []
+
+        # Critical validations (HALT if these fail)
+        segments = mcp_data.get("segments", [])
+        campaigns = mcp_data.get("campaigns", [])
+        flows = mcp_data.get("flows", [])
+        campaign_report = mcp_data.get("campaign_report", {})
+
+        # Verify segments exist (critical for audience targeting)
+        if not segments:
+            errors.append("No segments retrieved from Klaviyo - cannot generate audience-targeted campaigns")
+        elif len(segments) == 0:
+            errors.append("Segments array is empty - API call succeeded but returned no data")
+
+        # Verify at least some historical data exists
+        if not campaigns and not flows:
+            errors.append("No historical campaigns or flows found - cannot base recommendations on past performance")
+
+        # Verify performance data exists
+        if not campaign_report or not campaign_report.get("data"):
+            errors.append("No campaign performance data - cannot calculate ROI or optimize send times")
+
+        # Warnings (log but don't halt)
+        if not flows:
+            warnings.append("No flows found - this may be expected for newer accounts")
+
+        # If we have errors, raise an exception with detailed context
+        if errors:
+            error_msg = f"\n❌ MCP Data Validation Failed for {client_name} ({start_date} to {end_date})\n\n"
+            error_msg += "Critical Issues:\n"
+            for error in errors:
+                error_msg += f"  • {error}\n"
+
+            if warnings:
+                error_msg += "\nWarnings:\n"
+                for warning in warnings:
+                    error_msg += f"  ⚠️  {warning}\n"
+
+            error_msg += "\n🛑 WORKFLOW HALTED - Cannot generate calendar without real Klaviyo data"
+
+            raise ValueError(error_msg)
+
+        if warnings:
+            for warning in warnings:
+                logger.warning(warning)
+
     async def fetch_all_data(
         self,
         client_name: str,
@@ -492,25 +561,33 @@ class MCPClient:
             return_exceptions=True
         )
 
-        # Handle any exceptions
+        # 🔥 NEW: Fail immediately if any critical API call failed
+        critical_errors = []
+
         if isinstance(segments, Exception):
-            logger.error(f"Failed to fetch segments: {str(segments)}")
-            segments = []
+            critical_errors.append(f"Segments API failed: {str(segments)}")
 
         if isinstance(campaigns, Exception):
-            logger.error(f"Failed to fetch campaigns: {str(campaigns)}")
-            campaigns = []
+            critical_errors.append(f"Campaigns API failed: {str(campaigns)}")
 
         if isinstance(campaign_report, Exception):
-            logger.error(f"Failed to fetch campaign report: {str(campaign_report)}")
-            campaign_report = {}
+            critical_errors.append(f"Campaign report API failed: {str(campaign_report)}")
 
+        if critical_errors:
+            error_msg = f"\n❌ Critical MCP API Failures for {client_name}\n\n"
+            for error in critical_errors:
+                error_msg += f"  • {error}\n"
+            error_msg += "\n🛑 WORKFLOW HALTED - Cannot proceed without Klaviyo API access"
+
+            raise RuntimeError(error_msg)
+
+        # Non-critical failures can be warnings
         if isinstance(flows, Exception):
-            logger.error(f"Failed to fetch flows: {str(flows)}")
+            logger.warning(f"Flows API failed (non-critical): {str(flows)}")
             flows = []
 
         if isinstance(flow_report, Exception):
-            logger.error(f"Failed to fetch flow report: {str(flow_report)}")
+            logger.warning(f"Flow report API failed (non-critical): {str(flow_report)}")
             flow_report = {}
 
         result = {
@@ -527,6 +604,10 @@ class MCPClient:
             }
         }
 
-        logger.info(f"MCP data fetch complete: {len(segments)} segments, {len(campaigns)} campaigns, {len(flows)} flows")
+        # 🔥 NEW: Validate that we have REAL data, not empty structures
+        logger.info(f"Validating MCP data for {client_name}...")
+        self._validate_mcp_data(result, client_name, start_date, end_date)
+
+        logger.info(f"✅ MCP data validation passed: {len(segments)} segments, {len(campaigns)} campaigns, {len(flows)} flows")
 
         return result

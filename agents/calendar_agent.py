@@ -14,7 +14,7 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 from anthropic import Anthropic
 
-from data.mcp_client import MCPClient
+from data.native_mcp_client import NativeMCPClient as MCPClient
 from data.rag_client import RAGClient
 from data.firestore_client import FirestoreClient
 from data.mcp_cache import MCPCache
@@ -231,17 +231,36 @@ class CalendarAgent:
         if self.cache.has(cache_key):
             logger.info(f"Using cached MCP data for {client_name}")
             mcp_data = self.cache.get(cache_key)
-        else:
+
+            # 🔥 NEW: Validate cached data too (in case it was cached before validation was added)
+            try:
+                self.mcp._validate_mcp_data(mcp_data, client_name, start_date, end_date)
+            except ValueError as e:
+                logger.error(f"Cached MCP data failed validation - refetching")
+                self.cache.delete(cache_key)
+                mcp_data = None
+
+        if not self.cache.has(cache_key):
             # Fetch all MCP data in parallel
             logger.info(f"Fetching fresh MCP data for {client_name}")
-            mcp_data = await self.mcp.fetch_all_data(client_name, start_date, end_date)
+
+            try:
+                mcp_data = await self.mcp.fetch_all_data(client_name, start_date, end_date)
+                # ✅ Validation happens inside fetch_all_data() now
+
+            except (ValueError, RuntimeError) as e:
+                # Re-raise validation errors with clear context
+                logger.error(f"❌ MCP data validation failed: {str(e)}")
+                raise ValueError(
+                    f"Cannot generate calendar for {client_name} - MCP data validation failed.\n\n{str(e)}"
+                ) from e
 
             # Cache for future stages
             self.cache.set(cache_key, mcp_data)
-            logger.info(f"Cached MCP data with key: {cache_key}")
+            logger.info(f"Cached validated MCP data with key: {cache_key}")
 
         # Fetch RAG and Firestore data
-        rag_data = self.rag.get_all_data(client_name)
+        rag_data = await self.rag.get_all_data(client_name)
         firestore_data = self.firestore.get_all_data(client_name)
 
         # Load planning prompt
@@ -249,7 +268,7 @@ class CalendarAgent:
 
         # Format data for prompt
         mcp_formatted = self._format_mcp_data(mcp_data)
-        rag_formatted = self.rag.format_for_prompt(client_name)
+        rag_formatted = await self.rag.format_for_prompt(client_name)
         firestore_formatted = self.firestore.format_for_prompt(client_name)
 
         # Extract product catalog separately for prompt template
@@ -441,13 +460,13 @@ class CalendarAgent:
                 break
 
         # Fetch RAG data for design guidelines and product info
-        rag_data = self.rag.get_all_data(client_name)
+        rag_data = await self.rag.get_all_data(client_name)
 
         # Format data for prompt
         import json
         calendar_json_str = json.dumps(calendar_json, indent=2)
         mcp_formatted = self._format_mcp_data(mcp_data) if mcp_data else "No MCP data available"
-        rag_formatted = self.rag.format_for_prompt(client_name)
+        rag_formatted = await self.rag.format_for_prompt(client_name)
 
         # Extract product catalog separately for prompt template
         product_catalog_data = rag_data.get("product_catalog")

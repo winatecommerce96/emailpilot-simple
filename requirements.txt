@@ -24,3 +24,6 @@ fastapi>=0.104.0
 
 # Uvicorn ASGI server
 uvicorn[standard]>=0.24.0
+
+# UV package and tool runner for MCP servers
+uv>=0.1.0

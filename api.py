@@ -12,6 +12,7 @@ Usage:
 
 import os
 import logging
+import uuid
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from pathlib import Path
@@ -26,7 +27,7 @@ from dotenv import load_dotenv
 
 from tools import CalendarTool
 from agents.calendar_agent import CalendarAgent
-from data.mcp_client import MCPClient
+from data.native_mcp_client import NativeMCPClient as MCPClient
 from data.rag_client import RAGClient
 from data.firestore_client import FirestoreClient
 from data.mcp_cache import MCPCache
@@ -60,6 +61,20 @@ class WorkflowRequest(BaseModel):
     clientName: str
     startDate: str
     endDate: str
+
+
+class JobResponse(BaseModel):
+    """Response model for job status."""
+    job_id: str
+    status: str  # queued, stage-1, stage-2, stage-3, completed, failed
+    client_name: str
+    start_date: str
+    end_date: str
+    created_at: str
+    updated_at: str
+    current_stage: Optional[int] = None
+    results: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
 
 
 class PromptUpdateRequest(BaseModel):
@@ -96,13 +111,9 @@ async def lifespan(app: FastAPI):
     # Initialize data layer clients
     logger.info("Initializing data layer clients...")
 
-    secret_manager_client = SecretManagerClient(
-        project_id=os.getenv('GOOGLE_CLOUD_PROJECT')
-    )
-
-    rag_client = RAGClient(
-        rag_base_path='/Users/Damon/klaviyo/klaviyo-audit-automation/emailpilot-orchestrator/rag'
-    )
+    # RAG base path - defaults to local rag directory, configurable via env var
+    rag_base_path = os.getenv('RAG_BASE_PATH', './rag')
+    rag_client = RAGClient(rag_base_path=rag_base_path)
 
     firestore_client = FirestoreClient(
         project_id=os.getenv('GOOGLE_CLOUD_PROJECT')
@@ -111,7 +122,7 @@ async def lifespan(app: FastAPI):
     cache = MCPCache()
 
     # Initialize MCP client (async context manager)
-    mcp_client = MCPClient(secret_manager_client=secret_manager_client)
+    mcp_client = MCPClient(project_id=os.getenv('GOOGLE_CLOUD_PROJECT'))
     await mcp_client.__aenter__()
 
     logger.info("Data layer clients initialized")
@@ -222,6 +233,58 @@ async def health_check():
     )
 
 
+# Background task functions
+async def execute_workflow_background(
+    job_id: str,
+    client_name: str,
+    start_date: str,
+    end_date: str,
+    calendar_tool: CalendarTool
+):
+    """
+    Execute workflow in background and update job state.
+
+    This function runs asynchronously after the HTTP response is returned,
+    preventing Cloud Run timeout issues during long-running AI generation.
+    """
+    try:
+        logger.info(f"Starting background workflow execution for job {job_id}")
+
+        # Update status to stage-1
+        app_state['workflow_status'][job_id]['status'] = 'stage-1'
+        app_state['workflow_status'][job_id]['current_stage'] = 1
+        app_state['workflow_status'][job_id]['updated_at'] = datetime.utcnow().isoformat()
+
+        # Execute complete workflow
+        result = await calendar_tool.run_workflow(
+            client_name=client_name,
+            start_date=start_date,
+            end_date=end_date,
+            save_outputs=True
+        )
+
+        # Check if workflow succeeded
+        if result.get('success', False):
+            # Update to completed
+            app_state['workflow_status'][job_id]['status'] = 'completed'
+            app_state['workflow_status'][job_id]['results'] = result
+            app_state['workflow_status'][job_id]['updated_at'] = datetime.utcnow().isoformat()
+            logger.info(f"Workflow job {job_id} completed successfully")
+        else:
+            # Update to failed with error
+            app_state['workflow_status'][job_id]['status'] = 'failed'
+            app_state['workflow_status'][job_id]['error'] = result.get('error', 'Unknown error')
+            app_state['workflow_status'][job_id]['updated_at'] = datetime.utcnow().isoformat()
+            logger.error(f"Workflow job {job_id} failed: {result.get('error')}")
+
+    except Exception as e:
+        # Update to failed on exception
+        app_state['workflow_status'][job_id]['status'] = 'failed'
+        app_state['workflow_status'][job_id]['error'] = str(e)
+        app_state['workflow_status'][job_id]['updated_at'] = datetime.utcnow().isoformat()
+        logger.error(f"Workflow job {job_id} failed with exception: {str(e)}", exc_info=True)
+
+
 # Workflow endpoints
 @app.post("/api/workflow/run")
 async def run_workflow(request: WorkflowRequest, background_tasks: BackgroundTasks):
@@ -259,18 +322,43 @@ async def run_workflow(request: WorkflowRequest, background_tasks: BackgroundTas
             )
 
         elif stage == 'full':
-            # Run complete workflow
-            result = await calendar_tool.run_workflow(
-                client_name=client_name,
-                start_date=start_date,
-                end_date=end_date,
-                save_outputs=True
+            # Generate unique job ID
+            job_id = str(uuid.uuid4())
+
+            # Initialize job state
+            app_state['workflow_status'][job_id] = {
+                'job_id': job_id,
+                'status': 'queued',
+                'client_name': client_name,
+                'start_date': start_date,
+                'end_date': end_date,
+                'created_at': datetime.utcnow().isoformat(),
+                'updated_at': datetime.utcnow().isoformat(),
+                'current_stage': None,
+                'results': None,
+                'error': None
+            }
+
+            # Schedule background task (runs after response is sent)
+            background_tasks.add_task(
+                execute_workflow_background,
+                job_id,
+                client_name,
+                start_date,
+                end_date,
+                calendar_tool
             )
 
+            logger.info(f"Created workflow job {job_id} for {client_name}")
+
+            # Return job ID immediately
             return standard_response(
-                success=result.get('success', False),
-                data=result,
-                error=result.get('error')
+                success=True,
+                data={
+                    'job_id': job_id,
+                    'status': 'queued',
+                    'message': 'Workflow started in background. Poll /api/jobs/{job_id} for status.'
+                }
             )
 
         elif stage in ['stage-1', 'stage-2', 'stage-3']:
@@ -308,6 +396,31 @@ async def run_workflow(request: WorkflowRequest, background_tasks: BackgroundTas
             success=False,
             error=str(e)
         )
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job_status(job_id: str):
+    """
+    Get status and results for a workflow job.
+
+    Poll this endpoint after receiving a job_id from POST /api/workflow/run
+    to check job status and retrieve results when completed.
+
+    Returns:
+        - status: queued, stage-1, stage-2, stage-3, completed, failed
+        - current_stage: Current stage number (1-3) or None
+        - results: Full workflow results when status=completed
+        - error: Error message when status=failed
+    """
+    if job_id not in app_state['workflow_status']:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    job_data = app_state['workflow_status'][job_id]
+
+    return standard_response(
+        success=True,
+        data=job_data
+    )
 
 
 # Prompt management endpoints
@@ -618,10 +731,13 @@ if __name__ == "__main__":
 
     logger.info(f"Starting EmailPilot Simple API on port {port}")
 
+    # Use reload only in development
+    is_development = os.getenv('ENVIRONMENT', 'production') == 'development'
+
     uvicorn.run(
         "api:app",
         host="0.0.0.0",
         port=port,
-        reload=True,
+        reload=is_development,
         log_level="info"
     )

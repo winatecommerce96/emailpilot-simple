@@ -1,0 +1,64 @@
+{
+  "mcpServers": {
+    "Vlasic Klaviyo": {
+      "command": "/opt/anaconda3/bin/uvx",
+      "args": ["klaviyo-mcp-server@latest"],
+      "env": {
+        "PRIVATE_API_KEY": "pk_419ce5f004d140f0d8f2ebd614bb0db654",
+        "READ_ONLY": "true"
+      }
+    },
+    "Rogue Creamery Klaviyo": {
+      "command": "/opt/anaconda3/bin/uvx",
+      "args": ["klaviyo-mcp-server@latest"],
+      "env": {
+        "PRIVATE_API_KEY": "pk_41705a9abacbf2c7810c20129005c4b6b3",
+        "READ_ONLY": "true"
+      }
+    },
+    "Colorado Hemp Honey Klaviyo": {
+      "command": "/opt/anaconda3/bin/uvx",
+      "args": ["klaviyo-mcp-server@latest"],
+      "env": {
+        "PRIVATE_API_KEY": "pk_0bbc2e242a19b2533115389ac7fcc266b5",
+        "READ_ONLY": "true"
+      }
+    },
+    "Wheelchair Getaways Klaviyo": {
+      "command": "/opt/anaconda3/bin/uvx",
+      "args": ["klaviyo-mcp-server@latest"],
+      "env": {
+        "PRIVATE_API_KEY": "pk_7a8235b857e95c803455abce32abf44f69",
+        "READ_ONLY": "false"
+      }
+    },
+    "Milagro Klaviyo": {
+      "command": "/opt/anaconda3/bin/uvx",
+      "args": ["klaviyo-mcp-server@latest"],
+      "env": {
+        "PRIVATE_API_KEY": "pk_ba86433b068ccbb87e4b09de66a26559fc",
+        "READ_ONLY": "true"
+      }
+    },
+    "FASO Klaviyo": {
+      "command": "/opt/anaconda3/bin/uvx",
+      "args": ["klaviyo-mcp-server@latest"],
+      "env": {
+        "PRIVATE_API_KEY": "pk_2206f367852b8f54c834d3030e69919468",
+        "READ_ONLY": "true"
+      }
+    },
+    "Chris Bean Klaviyo": {
+      "command": "/opt/anaconda3/bin/uvx",
+      "args": ["klaviyo-mcp-server@latest"],
+      "env": {
+        "PRIVATE_API_KEY": "pk_0382b7440c7d660c40bb8a2621c561e4ec",
+        "READ_ONLY": "true"
+      }
+    },
+    "Wise": {
+      "command": "/opt/anaconda3/bin/python3",
+      "args": ["-m", "wise_mcp.main"]
+    }
+  }
+}
