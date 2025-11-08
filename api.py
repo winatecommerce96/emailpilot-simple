@@ -28,7 +28,7 @@ from dotenv import load_dotenv
 from tools import CalendarTool
 from agents.calendar_agent import CalendarAgent
 from data.native_mcp_client import NativeMCPClient as MCPClient
-from data.rag_client import RAGClient
+from data.enhanced_rag_client import EnhancedRAGClient as RAGClient
 from data.firestore_client import FirestoreClient
 from data.mcp_cache import MCPCache
 from data.secret_manager_client import SecretManagerClient
