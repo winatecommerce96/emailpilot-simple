@@ -27,3 +27,12 @@ uvicorn[standard]>=0.24.0
 
 # UV package and tool runner for MCP servers
 uv>=0.1.0
+
+# Structured logging for LangChain RAG orchestrator
+structlog>=23.0.0
+
+# Google Cloud Logging for DEBUG level logs in Cloud Run
+google-cloud-logging>=3.8.0
+
+# Google Cloud Storage for persistent output storage in Cloud Run
+google-cloud-storage>=2.10.0

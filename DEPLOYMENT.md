@@ -94,7 +94,7 @@ gcloud run deploy emailpilot-simple \
   --cpu 1 \
   --min-instances 0 \
   --max-instances 10 \
-  --timeout 300 \
+  --timeout 1200 \
   --set-env-vars ENVIRONMENT=production,GOOGLE_CLOUD_PROJECT=$PROJECT_ID \
   --update-secrets ANTHROPIC_API_KEY=anthropic-api-key:latest
 ```

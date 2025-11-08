@@ -151,17 +151,36 @@ class CalendarAgent:
         Returns:
             Claude's response text
         """
+        import time
+        call_start = time.time()
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+
         try:
+            logger.debug(f"[Claude API] Call started at {timestamp}")
+            logger.debug(f"[Claude API] Model: {self.model}")
+            logger.debug(f"[Claude API] Max tokens: {max_tokens:,}")
+            logger.debug(f"[Claude API] System prompt size: {len(system_prompt):,} characters")
+            logger.debug(f"[Claude API] User prompt size: {len(user_prompt):,} characters")
+
             logger.info(f"Calling Claude API (model: {self.model}, max_tokens: {max_tokens})")
 
             # Use streaming for high token counts to avoid timeout
             use_streaming = max_tokens > 16000
 
             if use_streaming:
+                logger.debug(f"[Claude API] Streaming mode selected (max_tokens {max_tokens:,} > 16000 threshold)")
+            else:
+                logger.debug(f"[Claude API] Non-streaming mode selected (max_tokens {max_tokens:,} <= 16000 threshold)")
+
+            if use_streaming:
                 logger.info(f"Using streaming mode for max_tokens={max_tokens}")
+
+                api_call_start = time.time()
+                logger.debug(f"[Claude API] Starting streaming request...")
 
                 # Initialize response text
                 response_text = ""
+                chunk_count = 0
 
                 # Stream the response
                 with self.client.messages.stream(
@@ -174,13 +193,25 @@ class CalendarAgent:
                 ) as stream:
                     for text in stream.text_stream:
                         response_text += text
+                        chunk_count += 1
 
+                api_call_duration = time.time() - api_call_start
+
+                logger.debug(f"[Claude API] Streaming complete: {chunk_count} chunks received")
+                logger.debug(f"[Claude API] Response size: {len(response_text):,} characters")
+                logger.debug(f"[Claude API] API call duration: {api_call_duration:.2f}s")
                 logger.info(f"Claude API streaming call successful ({len(response_text)} characters)")
+
+                total_duration = time.time() - call_start
+                logger.debug(f"[Claude API] Total call duration: {total_duration:.2f}s")
 
                 return response_text
 
             else:
                 # Standard non-streaming call for smaller requests
+                api_call_start = time.time()
+                logger.debug(f"[Claude API] Starting non-streaming request...")
+
                 response = self.client.messages.create(
                     model=self.model,
                     max_tokens=max_tokens,
@@ -190,15 +221,37 @@ class CalendarAgent:
                     ]
                 )
 
+                api_call_duration = time.time() - api_call_start
+
                 # Extract text from response
                 response_text = response.content[0].text
 
+                # Log response metadata if available
+                logger.debug(f"[Claude API] Response size: {len(response_text):,} characters")
+                logger.debug(f"[Claude API] API call duration: {api_call_duration:.2f}s")
+
+                # Log token usage if available
+                if hasattr(response, 'usage'):
+                    logger.debug(f"[Claude API] Input tokens: {response.usage.input_tokens:,}")
+                    logger.debug(f"[Claude API] Output tokens: {response.usage.output_tokens:,}")
+                    logger.debug(f"[Claude API] Total tokens: {response.usage.input_tokens + response.usage.output_tokens:,}")
+
+                # Log stop reason if available
+                if hasattr(response, 'stop_reason'):
+                    logger.debug(f"[Claude API] Stop reason: {response.stop_reason}")
+
                 logger.info(f"Claude API call successful ({len(response_text)} characters)")
+
+                total_duration = time.time() - call_start
+                logger.debug(f"[Claude API] Total call duration: {total_duration:.2f}s")
 
                 return response_text
 
         except Exception as e:
-            logger.error(f"Claude API call failed: {str(e)}")
+            error_duration = time.time() - call_start
+            logger.error(f"Claude API call failed after {error_duration:.2f}s: {str(e)}")
+            logger.debug(f"[Claude API] Error details - Model: {self.model}, Max tokens: {max_tokens:,}")
+            logger.debug(f"[Claude API] Error details - System prompt: {len(system_prompt):,} chars, User prompt: {len(user_prompt):,} chars")
             raise
 
     async def stage_1_planning(
@@ -223,72 +276,140 @@ class CalendarAgent:
         Returns:
             Planning output (strategic calendar in text format)
         """
+        import time
+        stage_start = time.time()
+
         logger.info(f"Stage 1: Planning for {client_name} ({start_date} to {end_date})")
+        logger.debug(f"[Stage 1] Workflow ID: {workflow_id}")
+        logger.debug(f"[Stage 1] Start timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
         # Check cache for existing MCP data
         cache_key = f"mcp_data:{client_name}:{start_date}_{end_date}"
+        logger.debug(f"[Stage 1] MCP cache key: {cache_key}")
 
         if self.cache.has(cache_key):
+            cache_fetch_start = time.time()
             logger.info(f"Using cached MCP data for {client_name}")
+            logger.debug(f"[Stage 1] Cache HIT for key: {cache_key}")
             mcp_data = self.cache.get(cache_key)
+            cache_fetch_duration = time.time() - cache_fetch_start
+            logger.debug(f"[Stage 1] Cache retrieval took {cache_fetch_duration:.2f}s")
+
+            # Calculate data size
+            import json
+            mcp_data_size = len(json.dumps(mcp_data))
+            logger.debug(f"[Stage 1] Cached MCP data size: {mcp_data_size:,} bytes")
 
             # 🔥 NEW: Validate cached data too (in case it was cached before validation was added)
             try:
+                validation_start = time.time()
                 self.mcp._validate_mcp_data(mcp_data, client_name, start_date, end_date)
+                validation_duration = time.time() - validation_start
+                logger.debug(f"[Stage 1] Cached MCP data validation successful ({validation_duration:.2f}s)")
             except ValueError as e:
                 logger.error(f"Cached MCP data failed validation - refetching")
+                logger.debug(f"[Stage 1] Validation error: {str(e)}")
                 self.cache.delete(cache_key)
+                logger.debug(f"[Stage 1] Cache entry deleted: {cache_key}")
                 mcp_data = None
 
         if not self.cache.has(cache_key):
             # Fetch all MCP data in parallel
             logger.info(f"Fetching fresh MCP data for {client_name}")
+            logger.debug(f"[Stage 1] Cache MISS for key: {cache_key}")
 
+            mcp_fetch_start = time.time()
             try:
                 mcp_data = await self.mcp.fetch_all_data(client_name, start_date, end_date)
+                mcp_fetch_duration = time.time() - mcp_fetch_start
+                logger.debug(f"[Stage 1] MCP data fetch took {mcp_fetch_duration:.2f}s")
+
+                # Calculate fetched data size
+                import json
+                mcp_data_size = len(json.dumps(mcp_data))
+                logger.debug(f"[Stage 1] Fetched MCP data size: {mcp_data_size:,} bytes")
+                logger.debug(f"[Stage 1] MCP data contains: segments={len(mcp_data.get('segments', []))}, campaigns={len(mcp_data.get('campaigns', []))}, flows={len(mcp_data.get('flows', []))}")
                 # ✅ Validation happens inside fetch_all_data() now
 
             except (ValueError, RuntimeError) as e:
                 # Re-raise validation errors with clear context
                 logger.error(f"❌ MCP data validation failed: {str(e)}")
+                logger.debug(f"[Stage 1] MCP fetch failed after {time.time() - mcp_fetch_start:.2f}s")
                 raise ValueError(
                     f"Cannot generate calendar for {client_name} - MCP data validation failed.\n\n{str(e)}"
                 ) from e
 
             # Cache for future stages
+            cache_set_start = time.time()
             self.cache.set(cache_key, mcp_data)
+            cache_set_duration = time.time() - cache_set_start
             logger.info(f"Cached validated MCP data with key: {cache_key}")
+            logger.debug(f"[Stage 1] Cache set took {cache_set_duration:.2f}s")
 
         # Fetch RAG and Firestore data
+        logger.info(f"Fetching RAG and Firestore data for {client_name}")
+
+        rag_fetch_start = time.time()
         rag_data = await self.rag.get_all_data(client_name)
+        rag_fetch_duration = time.time() - rag_fetch_start
+        rag_categories_with_content = len([v for v in rag_data.values() if v])
+        logger.debug(f"[Stage 1] RAG data fetch took {rag_fetch_duration:.2f}s")
+        logger.debug(f"[Stage 1] RAG data: {rag_categories_with_content} categories with content")
+
+        firestore_fetch_start = time.time()
         firestore_data = self.firestore.get_all_data(client_name)
+        firestore_fetch_duration = time.time() - firestore_fetch_start
+        firestore_fields_count = len(firestore_data) if firestore_data else 0
+        logger.debug(f"[Stage 1] Firestore data fetch took {firestore_fetch_duration:.2f}s")
+        logger.debug(f"[Stage 1] Firestore data: {firestore_fields_count} fields retrieved")
 
         # Load planning prompt
+        logger.debug(f"[Stage 1] Loading planning prompt: planning_v5_1_0.yaml")
         planning_prompt = self.load_prompt("planning_v5_1_0.yaml")
 
         # Format data for prompt
+        logger.debug(f"[Stage 1] Formatting data for prompt...")
+
+        format_mcp_start = time.time()
         mcp_formatted = self._format_mcp_data(mcp_data)
+        format_mcp_duration = time.time() - format_mcp_start
+        logger.debug(f"[Stage 1] MCP formatting took {format_mcp_duration:.2f}s ({len(mcp_formatted):,} characters)")
+
+        format_rag_start = time.time()
         rag_formatted = await self.rag.format_for_prompt(client_name)
+        format_rag_duration = time.time() - format_rag_start
+        logger.debug(f"[Stage 1] RAG formatting took {format_rag_duration:.2f}s ({len(rag_formatted):,} characters)")
+
+        format_firestore_start = time.time()
         firestore_formatted = self.firestore.format_for_prompt(client_name)
+        format_firestore_duration = time.time() - format_firestore_start
+        logger.debug(f"[Stage 1] Firestore formatting took {format_firestore_duration:.2f}s ({len(firestore_formatted):,} characters)")
 
         # Extract product catalog separately for prompt template
+        logger.debug(f"[Stage 1] Extracting product catalog...")
         product_catalog_data = rag_data.get("product_catalog")
         if product_catalog_data:
             if isinstance(product_catalog_data, dict) and "products" in product_catalog_data:
                 # For .txt files: extract the text content from {"products": "text"}
                 product_catalog_formatted = product_catalog_data["products"]
+                logger.debug(f"[Stage 1] Product catalog format: dict with 'products' key (text file)")
             elif isinstance(product_catalog_data, dict):
                 # For .json files: convert to formatted JSON string
                 product_catalog_formatted = json.dumps(product_catalog_data, indent=2)
+                logger.debug(f"[Stage 1] Product catalog format: dict (JSON file)")
             else:
                 # Fallback to string conversion
                 product_catalog_formatted = str(product_catalog_data)
+                logger.debug(f"[Stage 1] Product catalog format: other ({type(product_catalog_data).__name__})")
             logger.info(f"Product catalog extracted: {len(product_catalog_formatted)} characters")
+            logger.debug(f"[Stage 1] Product catalog size: {len(product_catalog_formatted):,} characters")
         else:
             product_catalog_formatted = "No product catalog available for this client."
             logger.warning(f"No product catalog found for {client_name}")
+            logger.debug(f"[Stage 1] No product catalog available")
 
         # Build prompt variables
+        logger.debug(f"[Stage 1] Building prompt variables...")
         variables = {
             "client_name": firestore_data.get("display_name", client_name),
             "start_date": start_date,
@@ -298,19 +419,34 @@ class CalendarAgent:
             "product_catalog": product_catalog_formatted,
             "client_config": firestore_formatted
         }
+        logger.debug(f"[Stage 1] Prompt variables: {len(variables)} total")
 
         # Build system and user prompts
+        logger.debug(f"[Stage 1] Building system and user prompts...")
+        prompt_build_start = time.time()
         system_prompt = self._build_system_prompt(planning_prompt)
         user_prompt = self._build_user_prompt(planning_prompt, variables)
+        prompt_build_duration = time.time() - prompt_build_start
+        logger.debug(f"[Stage 1] Prompt building took {prompt_build_duration:.2f}s")
+        logger.debug(f"[Stage 1] System prompt size: {len(system_prompt):,} characters")
+        logger.debug(f"[Stage 1] User prompt size: {len(user_prompt):,} characters")
 
         # Call Claude
+        logger.debug(f"[Stage 1] Calling Claude API...")
+        claude_call_start = time.time()
         planning_output = await self._call_claude(
             system_prompt,
             user_prompt,
             max_tokens=8000
         )
+        claude_call_duration = time.time() - claude_call_start
+        logger.debug(f"[Stage 1] Claude API call took {claude_call_duration:.2f}s")
+        logger.debug(f"[Stage 1] Planning output size: {len(planning_output):,} characters")
 
+        stage_total_duration = time.time() - stage_start
         logger.info(f"Stage 1: Planning complete ({len(planning_output)} characters)")
+        logger.debug(f"[Stage 1] Total stage duration: {stage_total_duration:.2f}s")
+        logger.debug(f"[Stage 1] End timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
         return planning_output
 
@@ -338,29 +474,52 @@ class CalendarAgent:
         Returns:
             Structured calendar JSON (as dict)
         """
+        import time
+        stage_start = time.time()
+
         logger.info(f"Stage 2: Structuring for {client_name}")
+        logger.debug(f"[Stage 2] Workflow ID: {workflow_id}")
+        logger.debug(f"[Stage 2] Start timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.debug(f"[Stage 2] Planning output size: {len(planning_output):,} characters")
 
         # Load structuring prompt
+        logger.debug(f"[Stage 2] Loading structuring prompt...")
+        prompt_load_start = time.time()
         structuring_prompt = self.load_prompt("calendar_structuring_v1_2_2.yaml")
+        prompt_load_duration = time.time() - prompt_load_start
+        logger.debug(f"[Stage 2] Prompt loading took {prompt_load_duration:.2f}s")
 
         # Build prompt variables
+        logger.debug(f"[Stage 2] Building prompt variables...")
         variables = {
             "client_name": client_name,
             "start_date": start_date,
             "end_date": end_date,
             "planning_output": planning_output
         }
+        logger.debug(f"[Stage 2] Prompt variables: {len(variables)} total")
 
         # Build system and user prompts
+        logger.debug(f"[Stage 2] Building system and user prompts...")
+        prompt_build_start = time.time()
         system_prompt = self._build_system_prompt(structuring_prompt)
         user_prompt = self._build_user_prompt(structuring_prompt, variables)
+        prompt_build_duration = time.time() - prompt_build_start
+        logger.debug(f"[Stage 2] Prompt building took {prompt_build_duration:.2f}s")
+        logger.debug(f"[Stage 2] System prompt size: {len(system_prompt):,} characters")
+        logger.debug(f"[Stage 2] User prompt size: {len(user_prompt):,} characters")
 
         # Call Claude
+        logger.debug(f"[Stage 2] Calling Claude API...")
+        claude_call_start = time.time()
         structuring_output = await self._call_claude(
             system_prompt,
             user_prompt,
             max_tokens=64000  # Increased from 16000 - large calendars can exceed 50k chars
         )
+        claude_call_duration = time.time() - claude_call_start
+        logger.debug(f"[Stage 2] Claude API call took {claude_call_duration:.2f}s")
+        logger.debug(f"[Stage 2] Structuring output size: {len(structuring_output):,} characters")
 
         logger.info(f"Stage 2: Structuring complete ({len(structuring_output)} characters)")
 
@@ -368,12 +527,15 @@ class CalendarAgent:
         import json
         import re
 
+        logger.debug(f"[Stage 2] Parsing JSON from output...")
+
         # Extract JSON from markdown code blocks if present
         # More robust extraction that handles various fence formats
         json_str = structuring_output.strip()
 
         # Check if response starts with markdown fence
         if json_str.startswith('```'):
+            logger.debug(f"[Stage 2] Detected markdown code fence in response")
             # Find the first newline after opening fence (skip language identifier)
             first_newline = json_str.find('\n')
             if first_newline != -1:
@@ -385,25 +547,46 @@ class CalendarAgent:
                     # Extract content between fences
                     json_str = json_str[first_newline + 1:closing_fence].strip()
                     logger.info(f"Extracted JSON from markdown code fence ({len(json_str)} characters)")
+                    logger.debug(f"[Stage 2] Extracted JSON size: {len(json_str):,} characters")
                 else:
                     # No closing fence - likely truncated output
                     logger.warning("Found opening fence but no closing fence - assuming truncation")
+                    logger.debug(f"[Stage 2] No closing fence found - potential truncation")
                     # Extract everything after the first newline (remove opening fence)
                     json_str = json_str[first_newline + 1:].strip()
                     logger.warning(f"Attempting to parse potentially incomplete JSON ({len(json_str)} characters)")
+                    logger.debug(f"[Stage 2] Attempting incomplete JSON parse: {len(json_str):,} characters")
             else:
                 logger.warning("Found opening fence but no newline - unexpected format")
+                logger.debug(f"[Stage 2] Unexpected fence format - no newline after opening fence")
                 # Try to extract JSON anyway (remove opening fence)
                 json_str = json_str[3:].strip()
+        else:
+            logger.debug(f"[Stage 2] No markdown fence detected - parsing raw response")
 
+        parse_start = time.time()
         try:
             calendar_json = json.loads(json_str)
+            parse_duration = time.time() - parse_start
             logger.info(f"Successfully parsed calendar JSON")
+            logger.debug(f"[Stage 2] JSON parsing took {parse_duration:.2f}s")
+
+            # Log JSON structure details
+            campaign_count = len(calendar_json.get('campaigns', []))
+            logger.debug(f"[Stage 2] Parsed calendar contains {campaign_count} campaigns")
+
+            stage_total_duration = time.time() - stage_start
+            logger.debug(f"[Stage 2] Total stage duration: {stage_total_duration:.2f}s")
+            logger.debug(f"[Stage 2] End timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
             return calendar_json
 
         except json.JSONDecodeError as e:
+            parse_duration = time.time() - parse_start
             logger.error(f"Failed to parse calendar JSON: {str(e)}")
             logger.error(f"JSON parse error at position {e.pos}: {e.msg}")
+            logger.debug(f"[Stage 2] JSON parsing failed after {parse_duration:.2f}s")
+            logger.debug(f"[Stage 2] Error position: {e.pos}, Error message: {e.msg}")
 
             # Try to provide helpful error context
             if e.pos is not None and len(json_str) > e.pos:
@@ -411,6 +594,11 @@ class CalendarAgent:
                 context_end = min(len(json_str), e.pos + 100)
                 error_context = json_str[context_start:context_end]
                 logger.error(f"Error context: ...{error_context}...")
+                logger.debug(f"[Stage 2] Error context window: chars {context_start} to {context_end}")
+
+            stage_total_duration = time.time() - stage_start
+            logger.debug(f"[Stage 2] Total stage duration (with error): {stage_total_duration:.2f}s")
+            logger.debug(f"[Stage 2] End timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
             # Return error structure with diagnostic info
             return {
@@ -443,13 +631,28 @@ class CalendarAgent:
         Returns:
             Detailed execution briefs (text format)
         """
+        import time
+        stage_start = time.time()
+
         logger.info(f"Stage 3: Brief Generation for {client_name}")
+        logger.debug(f"[Stage 3] Workflow ID: {workflow_id}")
+        logger.debug(f"[Stage 3] Start timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+        # Log calendar JSON size
+        campaign_count = len(calendar_json.get('campaigns', []))
+        logger.debug(f"[Stage 3] Calendar JSON contains {campaign_count} campaigns")
 
         # Load brief generation prompt
+        logger.debug(f"[Stage 3] Loading brief generation prompt...")
+        prompt_load_start = time.time()
         briefs_prompt = self.load_prompt("brief_generation_v2_2_0.yaml")
+        prompt_load_duration = time.time() - prompt_load_start
+        logger.debug(f"[Stage 3] Prompt loading took {prompt_load_duration:.2f}s")
 
         # Retrieve cached MCP data for context
         # (We need performance data and segment information for briefs)
+        logger.debug(f"[Stage 3] Retrieving cached MCP data...")
+        cache_retrieve_start = time.time()
         cache_key_pattern = f"mcp_data:{client_name}:"
         cache_stats = self.cache.get_stats()
 
@@ -457,35 +660,68 @@ class CalendarAgent:
         for key in cache_stats["keys"]:
             if key.startswith(cache_key_pattern):
                 mcp_data = self.cache.get(key)
+                logger.debug(f"[Stage 3] Found cached MCP data with key: {key}")
                 break
 
+        cache_retrieve_duration = time.time() - cache_retrieve_start
+        if mcp_data:
+            logger.debug(f"[Stage 3] Cache retrieval took {cache_retrieve_duration:.2f}s (hit)")
+        else:
+            logger.debug(f"[Stage 3] Cache retrieval took {cache_retrieve_duration:.2f}s (miss)")
+
         # Fetch RAG data for design guidelines and product info
+        logger.debug(f"[Stage 3] Fetching RAG data...")
+        rag_fetch_start = time.time()
         rag_data = await self.rag.get_all_data(client_name)
+        rag_fetch_duration = time.time() - rag_fetch_start
+        rag_categories_found = len([v for v in rag_data.values() if v is not None])
+        logger.debug(f"[Stage 3] RAG data fetch took {rag_fetch_duration:.2f}s ({rag_categories_found} categories)")
 
         # Format data for prompt
+        logger.debug(f"[Stage 3] Formatting data for prompt...")
+        format_start = time.time()
         import json
         calendar_json_str = json.dumps(calendar_json, indent=2)
+        logger.debug(f"[Stage 3] Calendar JSON size: {len(calendar_json_str):,} characters")
+
         mcp_formatted = self._format_mcp_data(mcp_data) if mcp_data else "No MCP data available"
+        logger.debug(f"[Stage 3] MCP data formatted: {len(mcp_formatted):,} characters")
+
         rag_formatted = await self.rag.format_for_prompt(client_name)
+        logger.debug(f"[Stage 3] RAG data formatted: {len(rag_formatted):,} characters")
+
+        format_duration = time.time() - format_start
+        logger.debug(f"[Stage 3] Data formatting took {format_duration:.2f}s")
 
         # Extract product catalog separately for prompt template
+        logger.debug(f"[Stage 3] Extracting product catalog...")
+        catalog_extract_start = time.time()
         product_catalog_data = rag_data.get("product_catalog")
         if product_catalog_data:
             if isinstance(product_catalog_data, dict) and "products" in product_catalog_data:
                 # For .txt files: extract the text content from {"products": "text"}
                 product_catalog_formatted = product_catalog_data["products"]
+                logger.debug(f"[Stage 3] Product catalog extracted from dict['products']")
             elif isinstance(product_catalog_data, dict):
                 # For .json files: convert to formatted JSON string
                 product_catalog_formatted = json.dumps(product_catalog_data, indent=2)
+                logger.debug(f"[Stage 3] Product catalog converted from JSON dict")
             else:
                 # Fallback to string conversion
                 product_catalog_formatted = str(product_catalog_data)
+                logger.debug(f"[Stage 3] Product catalog converted to string (fallback)")
             logger.info(f"Product catalog extracted for briefs: {len(product_catalog_formatted)} characters")
+            logger.debug(f"[Stage 3] Product catalog size: {len(product_catalog_formatted):,} characters")
         else:
             product_catalog_formatted = "No product catalog available for this client."
             logger.warning(f"No product catalog found for {client_name} briefs stage")
+            logger.debug(f"[Stage 3] No product catalog found - using placeholder")
+
+        catalog_extract_duration = time.time() - catalog_extract_start
+        logger.debug(f"[Stage 3] Product catalog extraction took {catalog_extract_duration:.2f}s")
 
         # Build prompt variables
+        logger.debug(f"[Stage 3] Building prompt variables...")
         variables = {
             "client_name": client_name,
             "calendar_json": calendar_json_str,
@@ -493,19 +729,35 @@ class CalendarAgent:
             "brand_intelligence": rag_formatted,
             "product_catalog": product_catalog_formatted
         }
+        logger.debug(f"[Stage 3] Prompt variables: {len(variables)} total")
 
         # Build system and user prompts
+        logger.debug(f"[Stage 3] Building system and user prompts...")
+        prompt_build_start = time.time()
         system_prompt = self._build_system_prompt(briefs_prompt)
         user_prompt = self._build_user_prompt(briefs_prompt, variables)
+        prompt_build_duration = time.time() - prompt_build_start
+        logger.debug(f"[Stage 3] Prompt building took {prompt_build_duration:.2f}s")
+        logger.debug(f"[Stage 3] System prompt size: {len(system_prompt):,} characters")
+        logger.debug(f"[Stage 3] User prompt size: {len(user_prompt):,} characters")
 
         # Call Claude
+        logger.debug(f"[Stage 3] Calling Claude API...")
+        claude_call_start = time.time()
         briefs_output = await self._call_claude(
             system_prompt,
             user_prompt,
             max_tokens=16000  # Briefs are longer
         )
+        claude_call_duration = time.time() - claude_call_start
+        logger.debug(f"[Stage 3] Claude API call took {claude_call_duration:.2f}s")
+        logger.debug(f"[Stage 3] Briefs output size: {len(briefs_output):,} characters")
 
         logger.info(f"Stage 3: Brief Generation complete ({len(briefs_output)} characters)")
+
+        stage_total_duration = time.time() - stage_start
+        logger.debug(f"[Stage 3] Total stage duration: {stage_total_duration:.2f}s")
+        logger.debug(f"[Stage 3] End timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
         return briefs_output
 

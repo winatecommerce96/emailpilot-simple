@@ -15,6 +15,12 @@ from agents.calendar_agent import CalendarAgent
 from tools.validator import CalendarValidator
 from tools.format_adapter import CalendarFormatAdapter
 
+# Import storage client conditionally (may not be available in all environments)
+try:
+    from data.storage_client import StorageClient
+except ImportError:
+    StorageClient = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,26 +40,32 @@ class CalendarTool:
         self,
         calendar_agent: CalendarAgent,
         output_dir: Optional[str] = None,
-        validate_outputs: bool = True
+        validate_outputs: bool = True,
+        storage_client: Optional['StorageClient'] = None
     ):
         """
         Initialize Calendar Tool.
 
         Args:
             calendar_agent: Configured CalendarAgent instance
-            output_dir: Directory to save workflow outputs (optional)
+            output_dir: Directory to save workflow outputs (optional, for local dev)
             validate_outputs: Whether to validate outputs after each stage
+            storage_client: GCS storage client for persistent outputs (optional, for production)
         """
         self.agent = calendar_agent
         self.validator = CalendarValidator()
         self.format_adapter = CalendarFormatAdapter()
         self.output_dir = Path(output_dir) if output_dir else None
         self.validate_outputs = validate_outputs
+        self.storage_client = storage_client
 
-        # Create output directory if specified
+        # Create output directory if specified (development)
         if self.output_dir:
             self.output_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"Output directory: {self.output_dir}")
+
+        if self.storage_client:
+            logger.info("StorageClient configured for persistent output storage")
 
         logger.info("CalendarTool initialized")
 
@@ -272,61 +284,93 @@ class CalendarTool:
         validation: Dict[str, Any]
     ) -> None:
         """
-        Save workflow outputs to files.
+        Save workflow outputs to GCS and/or local files.
 
         Args:
             workflow_id: Workflow identifier
             result: Workflow result
             validation: Validation results
         """
-        if not self.output_dir:
-            return
-
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        base_path = self.output_dir / f"{workflow_id}_{timestamp}"
+        base_filename = f"{workflow_id}_{timestamp}"
 
         try:
             # Save planning output
             if result.get("planning"):
-                planning_path = f"{base_path}_planning.txt"
-                with open(planning_path, 'w', encoding='utf-8') as f:
-                    f.write(result["planning"])
-                logger.info(f"Saved planning output: {planning_path}")
+                filename = f"{base_filename}_planning.txt"
+
+                # Save to GCS if available (production)
+                if self.storage_client:
+                    self.storage_client.save_output(filename, result["planning"], "text/plain")
+
+                # Also save locally if output_dir set (development)
+                if self.output_dir:
+                    planning_path = self.output_dir / filename
+                    with open(planning_path, 'w', encoding='utf-8') as f:
+                        f.write(result["planning"])
+                    logger.info(f"Saved planning output locally: {planning_path}")
 
             # Save calendar JSON
             if result.get("calendar_json"):
-                calendar_path = f"{base_path}_calendar.json"
-                with open(calendar_path, 'w', encoding='utf-8') as f:
-                    json.dump(result["calendar_json"], f, indent=2)
-                logger.info(f"Saved calendar JSON: {calendar_path}")
+                filename = f"{base_filename}_calendar.json"
+                content = json.dumps(result["calendar_json"], indent=2)
+
+                if self.storage_client:
+                    self.storage_client.save_output(filename, content, "application/json")
+
+                if self.output_dir:
+                    calendar_path = self.output_dir / filename
+                    with open(calendar_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    logger.info(f"Saved calendar JSON locally: {calendar_path}")
 
             # Transform and save app format
             if result.get("calendar_json"):
                 try:
-                    client_id = workflow_id.split('_')[0]  # Extract client name
+                    client_id = workflow_id.split('_')[0]
                     app_calendar = self.format_adapter.transform_to_app_format(
                         result["calendar_json"],
                         client_id=client_id
                     )
-                    app_path = f"{base_path}_calendar_app.json"
-                    with open(app_path, 'w', encoding='utf-8') as f:
-                        json.dump(app_calendar, f, indent=2)
-                    logger.info(f"Saved app format calendar: {app_path}")
+                    filename = f"{base_filename}_calendar_app.json"
+                    content = json.dumps(app_calendar, indent=2)
+
+                    if self.storage_client:
+                        self.storage_client.save_output(filename, content, "application/json")
+
+                    if self.output_dir:
+                        app_path = self.output_dir / filename
+                        with open(app_path, 'w', encoding='utf-8') as f:
+                            f.write(content)
+                        logger.info(f"Saved app format calendar locally: {app_path}")
                 except Exception as e:
                     logger.error(f"Failed to save app format: {str(e)}")
 
             # Save briefs output
             if result.get("briefs"):
-                briefs_path = f"{base_path}_briefs.txt"
-                with open(briefs_path, 'w', encoding='utf-8') as f:
-                    f.write(result["briefs"])
-                logger.info(f"Saved briefs output: {briefs_path}")
+                filename = f"{base_filename}_briefs.txt"
+
+                if self.storage_client:
+                    self.storage_client.save_output(filename, result["briefs"], "text/plain")
+
+                if self.output_dir:
+                    briefs_path = self.output_dir / filename
+                    with open(briefs_path, 'w', encoding='utf-8') as f:
+                        f.write(result["briefs"])
+                    logger.info(f"Saved briefs output locally: {briefs_path}")
 
             # Save validation report
-            validation_path = f"{base_path}_validation.json"
-            with open(validation_path, 'w', encoding='utf-8') as f:
-                json.dump(validation, f, indent=2)
-            logger.info(f"Saved validation report: {validation_path}")
+            filename = f"{base_filename}_validation.json"
+            content = json.dumps(validation, indent=2)
+
+            if self.storage_client:
+                self.storage_client.save_output(filename, content, "application/json")
+
+            if self.output_dir:
+                validation_path = self.output_dir / filename
+                with open(validation_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                logger.info(f"Saved validation report locally: {validation_path}")
 
         except Exception as e:
             logger.error(f"Failed to save outputs: {str(e)}")

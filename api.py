@@ -37,11 +37,21 @@ from data.secret_manager_client import SecretManagerClient
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+if os.getenv('ENVIRONMENT') == 'production':
+    # Use Google Cloud Logging in production for DEBUG level support
+    import google.cloud.logging
+    client = google.cloud.logging.Client()
+    client.setup_logging(log_level=logging.DEBUG)
+    logger = logging.getLogger(__name__)
+    logger.info("Cloud Logging configured for production with DEBUG level")
+else:
+    # Use basic logging for local development
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    logger = logging.getLogger(__name__)
+    logger.info("Basic logging configured for development with DEBUG level")
 
 # Global state
 app_state = {
@@ -142,12 +152,27 @@ async def lifespan(app: FastAPI):
 
     logger.info("CalendarAgent initialized")
 
+    # Initialize StorageClient for production persistent storage
+    storage_client = None
+    if os.getenv('ENVIRONMENT') == 'production':
+        try:
+            from data.storage_client import StorageClient
+            storage_client = StorageClient(
+                project_id=os.getenv('GOOGLE_CLOUD_PROJECT')
+            )
+            logger.info("StorageClient initialized for production")
+        except Exception as e:
+            logger.warning(f"Failed to initialize StorageClient: {str(e)}")
+    else:
+        logger.info("Development mode - using local file storage only")
+
     # Initialize Calendar Tool
     output_dir = './outputs'
     calendar_tool = CalendarTool(
         calendar_agent=calendar_agent,
         output_dir=output_dir,
-        validate_outputs=True
+        validate_outputs=True,
+        storage_client=storage_client
     )
 
     logger.info("CalendarTool initialized")
@@ -158,6 +183,7 @@ async def lifespan(app: FastAPI):
     app_state['mcp_client'] = mcp_client
     app_state['rag_client'] = rag_client
     app_state['cache'] = cache
+    app_state['storage_client'] = storage_client
     app_state['initialized'] = True
 
     logger.info("EmailPilot Simple API ready")
@@ -579,24 +605,54 @@ async def get_mcp_data(request: MCPDataRequest):
 @app.get("/api/outputs/{output_type}")
 async def get_output(output_type: str):
     """
-    Retrieve workflow outputs.
+    Retrieve workflow outputs from GCS or local files.
 
     Types: planning, calendar, briefs
     """
-    outputs_dir = Path(__file__).parent / "outputs"
-
-    if not outputs_dir.exists():
-        raise HTTPException(status_code=404, detail="No outputs directory found")
-
     try:
+        # Try GCS first if available (production)
+        if app_state.get('storage_client'):
+            logger.debug(f"Attempting to retrieve {output_type} from GCS")
+            result = app_state['storage_client'].get_latest_output(output_type)
+
+            if result:
+                logger.info(f"Retrieved {output_type} from GCS: {result['filename']}")
+                return standard_response(
+                    success=True,
+                    data={
+                        "type": output_type,
+                        "filename": result["filename"],
+                        "content": result["content"],
+                        "modified": result["modified"]
+                    }
+                )
+            else:
+                logger.debug(f"No {output_type} found in GCS")
+
+        # Fallback to local file system (development)
+        logger.debug(f"Attempting to retrieve {output_type} from local file system")
+        outputs_dir = Path(__file__).parent / "outputs"
+
+        if not outputs_dir.exists():
+            logger.debug("No local outputs directory found")
+            return standard_response(
+                success=True,
+                data={
+                    "type": output_type,
+                    "content": None,
+                    "message": f"No {output_type} outputs found"
+                }
+            )
+
         # Find latest output file of the requested type
         pattern = f"*_{output_type}_*.txt" if output_type == "planning" else \
                   f"*_{output_type}_*.json" if output_type == "calendar" else \
-                  f"*_{output_type}_*.md"
+                  f"*_{output_type}_*.txt"
 
         output_files = list(outputs_dir.glob(pattern))
 
         if not output_files:
+            logger.debug(f"No {output_type} files found locally")
             return standard_response(
                 success=True,
                 data={
@@ -612,6 +668,7 @@ async def get_output(output_type: str):
         with open(latest_file, 'r') as f:
             content = f.read()
 
+        logger.info(f"Retrieved {output_type} from local file: {latest_file.name}")
         return standard_response(
             success=True,
             data={
