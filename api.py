@@ -32,6 +32,7 @@ from data.enhanced_rag_client import EnhancedRAGClient as RAGClient
 from data.firestore_client import FirestoreClient
 from data.mcp_cache import MCPCache
 from data.secret_manager_client import SecretManagerClient
+from data.review_state_manager import ReviewStateManager, ReviewStatus
 
 # Load environment variables
 load_dotenv()
@@ -102,6 +103,19 @@ class MCPDataRequest(BaseModel):
     clientName: str
     startDate: str
     endDate: str
+
+
+class CheckpointWorkflowRequest(BaseModel):
+    """Request model for checkpoint workflow execution (Stage 1-2 only)."""
+    clientName: str
+    startDate: str
+    endDate: str
+
+
+class ReviewUpdateRequest(BaseModel):
+    """Request model for review approval/rejection."""
+    reviewed_by: Optional[str] = None
+    review_notes: Optional[str] = None
 
 
 # Lifespan context manager
@@ -184,6 +198,12 @@ async def lifespan(app: FastAPI):
     app_state['rag_client'] = rag_client
     app_state['cache'] = cache
     app_state['storage_client'] = storage_client
+
+    # Initialize ReviewStateManager for review checkpoint workflow
+    review_manager = ReviewStateManager(project_id=os.getenv('GOOGLE_CLOUD_PROJECT'))
+    app_state['review_manager'] = review_manager
+    logger.info("ReviewStateManager initialized")
+
     app_state['initialized'] = True
 
     logger.info("EmailPilot Simple API ready")
@@ -309,6 +329,119 @@ async def execute_workflow_background(
         app_state['workflow_status'][job_id]['error'] = str(e)
         app_state['workflow_status'][job_id]['updated_at'] = datetime.utcnow().isoformat()
         logger.error(f"Workflow job {job_id} failed with exception: {str(e)}", exc_info=True)
+
+
+async def execute_checkpoint_workflow_background(
+    job_id: str,
+    client_name: str,
+    start_date: str,
+    end_date: str,
+    calendar_agent: 'CalendarAgent',
+    review_manager: 'ReviewStateManager'
+):
+    """
+    Execute checkpoint workflow (Stage 1-2) in background and save for review.
+
+    This function runs asynchronously, executing Stage 1 (planning) and
+    Stage 2 (calendar structuring), then saving the results to Firestore
+    for manual review before Stage 3 (brief generation).
+    """
+    try:
+        logger.info(f"Starting checkpoint workflow for job {job_id}")
+
+        # Update status to stage-1
+        app_state['workflow_status'][job_id]['status'] = 'stage-1'
+        app_state['workflow_status'][job_id]['current_stage'] = 1
+        app_state['workflow_status'][job_id]['updated_at'] = datetime.utcnow().isoformat()
+
+        # Execute checkpoint workflow (Stage 1-2)
+        result = await calendar_agent.run_workflow_with_checkpoint(
+            client_name=client_name,
+            start_date=start_date,
+            end_date=end_date,
+            review_manager=review_manager
+        )
+
+        # Check if workflow succeeded
+        if result.get('success', False):
+            # Update to pending_review status
+            app_state['workflow_status'][job_id]['status'] = 'pending_review'
+            app_state['workflow_status'][job_id]['workflow_id'] = result.get('workflow_id')
+            app_state['workflow_status'][job_id]['results'] = result
+            app_state['workflow_status'][job_id]['updated_at'] = datetime.utcnow().isoformat()
+            logger.info(f"Checkpoint workflow {job_id} completed, awaiting review")
+        else:
+            # Update to failed with error
+            app_state['workflow_status'][job_id]['status'] = 'failed'
+            app_state['workflow_status'][job_id]['error'] = result.get('error', 'Unknown error')
+            app_state['workflow_status'][job_id]['updated_at'] = datetime.utcnow().isoformat()
+            logger.error(f"Checkpoint workflow {job_id} failed: {result.get('error')}")
+
+    except Exception as e:
+        # Update to failed on exception
+        app_state['workflow_status'][job_id]['status'] = 'failed'
+        app_state['workflow_status'][job_id]['error'] = str(e)
+        app_state['workflow_status'][job_id]['updated_at'] = datetime.utcnow().isoformat()
+        logger.error(f"Checkpoint workflow {job_id} failed with exception: {str(e)}", exc_info=True)
+
+
+async def execute_resume_workflow_background(
+    job_id: str,
+    workflow_id: str,
+    calendar_agent: 'CalendarAgent',
+    review_manager: 'ReviewStateManager'
+):
+    """
+    Resume an approved workflow to execute Stage 3 (brief generation) in background.
+
+    This function loads the approved Stage 1-2 outputs from Firestore and
+    executes Stage 3 to generate campaign briefs.
+    """
+    try:
+        logger.info(f"Starting resume workflow for job {job_id}, workflow {workflow_id}")
+
+        # Update status to stage-3
+        app_state['workflow_status'][job_id]['status'] = 'stage-3'
+        app_state['workflow_status'][job_id]['current_stage'] = 3
+        app_state['workflow_status'][job_id]['updated_at'] = datetime.utcnow().isoformat()
+
+        # Load review state from Firestore
+        review_state = review_manager.get_review_state(workflow_id)
+        if not review_state:
+            raise ValueError(f"Review state not found for workflow: {workflow_id}")
+
+        # Verify review is approved
+        if review_state.get('review_status') != ReviewStatus.APPROVED.value:
+            raise ValueError(
+                f"Review must be approved before resuming. Current status: {review_state.get('review_status')}"
+            )
+
+        # Execute Stage 3 using the resume method
+        result = await calendar_agent.resume_workflow_from_review(
+            review_state=review_state,
+            workflow_id=workflow_id
+        )
+
+        # Check if workflow succeeded
+        if result.get('success', False):
+            # Update to completed status
+            app_state['workflow_status'][job_id]['status'] = 'completed'
+            app_state['workflow_status'][job_id]['results'] = result
+            app_state['workflow_status'][job_id]['updated_at'] = datetime.utcnow().isoformat()
+            logger.info(f"Resume workflow {job_id} completed successfully")
+        else:
+            # Update to failed with error
+            app_state['workflow_status'][job_id]['status'] = 'failed'
+            app_state['workflow_status'][job_id]['error'] = result.get('error', 'Unknown error')
+            app_state['workflow_status'][job_id]['updated_at'] = datetime.utcnow().isoformat()
+            logger.error(f"Resume workflow {job_id} failed: {result.get('error')}")
+
+    except Exception as e:
+        # Update to failed on exception
+        app_state['workflow_status'][job_id]['status'] = 'failed'
+        app_state['workflow_status'][job_id]['error'] = str(e)
+        app_state['workflow_status'][job_id]['updated_at'] = datetime.utcnow().isoformat()
+        logger.error(f"Resume workflow {job_id} failed with exception: {str(e)}", exc_info=True)
 
 
 # Workflow endpoints
@@ -446,6 +579,316 @@ async def get_job_status(job_id: str):
     return standard_response(
         success=True,
         data=job_data
+    )
+
+
+# Review endpoints
+@app.post("/api/workflows/checkpoint", status_code=202)
+async def checkpoint_workflow(request: CheckpointWorkflowRequest, background_tasks: BackgroundTasks):
+    """
+    Execute checkpoint workflow (Stage 1-2 only) and save for manual review.
+
+    This endpoint starts a workflow that executes Stage 1 (planning) and
+    Stage 2 (calendar structuring), then saves the results to Firestore
+    for manual review before Stage 3 (brief generation).
+
+    Returns a job_id for tracking the checkpoint workflow status.
+    """
+    # Verify required components
+    if 'calendar_agent' not in app_state or app_state['calendar_agent'] is None:
+        raise HTTPException(status_code=503, detail="CalendarAgent not initialized")
+
+    if 'review_manager' not in app_state or app_state['review_manager'] is None:
+        raise HTTPException(status_code=503, detail="ReviewStateManager not initialized")
+
+    if not app_state['review_manager'].is_available():
+        raise HTTPException(status_code=503, detail="Firestore not available for review state management")
+
+    # Generate job ID
+    job_id = f"{request.clientName}_{request.startDate}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+
+    # Initialize job status
+    app_state['workflow_status'][job_id] = {
+        'job_id': job_id,
+        'status': 'queued',
+        'client_name': request.clientName,
+        'start_date': request.startDate,
+        'end_date': request.endDate,
+        'created_at': datetime.utcnow().isoformat(),
+        'updated_at': datetime.utcnow().isoformat(),
+        'workflow_type': 'checkpoint'
+    }
+
+    # Start background task
+    background_tasks.add_task(
+        execute_checkpoint_workflow_background,
+        job_id=job_id,
+        client_name=request.clientName,
+        start_date=request.startDate,
+        end_date=request.endDate,
+        calendar_agent=app_state['calendar_agent'],
+        review_manager=app_state['review_manager']
+    )
+
+    return standard_response(
+        success=True,
+        data={
+            'job_id': job_id,
+            'message': 'Checkpoint workflow started (Stage 1-2). Results will be saved for review.',
+            'status_url': f'/api/workflows/status/{job_id}'
+        }
+    )
+
+
+@app.get("/api/reviews/pending")
+async def list_pending_reviews(client_name: Optional[str] = None, limit: int = 50):
+    """
+    List workflows pending review.
+
+    Query Parameters:
+        client_name: Optional filter by client slug
+        limit: Maximum number of results (default: 50, max: 100)
+
+    Returns list of workflows awaiting manual review.
+    """
+    # Verify review manager
+    if 'review_manager' not in app_state or app_state['review_manager'] is None:
+        raise HTTPException(status_code=503, detail="ReviewStateManager not initialized")
+
+    if not app_state['review_manager'].is_available():
+        raise HTTPException(status_code=503, detail="Firestore not available")
+
+    # Validate limit
+    if limit > 100:
+        limit = 100
+
+    # Fetch pending reviews
+    try:
+        pending_reviews = app_state['review_manager'].list_pending_reviews(
+            client_name=client_name,
+            limit=limit
+        )
+
+        return standard_response(
+            success=True,
+            data={
+                'count': len(pending_reviews),
+                'reviews': pending_reviews
+            }
+        )
+    except Exception as e:
+        logger.error(f"Failed to list pending reviews: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to list reviews: {str(e)}")
+
+
+@app.get("/api/reviews/{workflow_id}")
+async def get_review_details(workflow_id: str):
+    """
+    Get detailed review state for a specific workflow.
+
+    Path Parameters:
+        workflow_id: Workflow identifier
+
+    Returns full review state including planning output, calendar JSON,
+    validation results, and review status.
+    """
+    # Verify review manager
+    if 'review_manager' not in app_state or app_state['review_manager'] is None:
+        raise HTTPException(status_code=503, detail="ReviewStateManager not initialized")
+
+    if not app_state['review_manager'].is_available():
+        raise HTTPException(status_code=503, detail="Firestore not available")
+
+    # Fetch review state
+    try:
+        review_state = app_state['review_manager'].get_review_state(workflow_id)
+
+        if not review_state:
+            raise HTTPException(status_code=404, detail=f"Review not found: {workflow_id}")
+
+        return standard_response(
+            success=True,
+            data=review_state
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get review details: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get review: {str(e)}")
+
+
+@app.post("/api/reviews/{workflow_id}/approve")
+async def approve_review(workflow_id: str, request: ReviewUpdateRequest):
+    """
+    Approve a workflow review.
+
+    Path Parameters:
+        workflow_id: Workflow identifier
+
+    Request Body:
+        reviewed_by: Optional email/ID of reviewer
+        review_notes: Optional approval notes
+
+    Marks the review as approved. The workflow can then be resumed
+    via POST /api/workflows/resume/{workflow_id} to execute Stage 3.
+    """
+    # Verify review manager
+    if 'review_manager' not in app_state or app_state['review_manager'] is None:
+        raise HTTPException(status_code=503, detail="ReviewStateManager not initialized")
+
+    if not app_state['review_manager'].is_available():
+        raise HTTPException(status_code=503, detail="Firestore not available")
+
+    # Verify review exists
+    review_state = app_state['review_manager'].get_review_state(workflow_id)
+    if not review_state:
+        raise HTTPException(status_code=404, detail=f"Review not found: {workflow_id}")
+
+    # Update review status to approved
+    try:
+        success = app_state['review_manager'].update_review_status(
+            workflow_id=workflow_id,
+            status=ReviewStatus.APPROVED,
+            reviewed_by=request.reviewed_by,
+            review_notes=request.review_notes
+        )
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update review status")
+
+        return standard_response(
+            success=True,
+            data={
+                'workflow_id': workflow_id,
+                'review_status': 'approved',
+                'message': 'Review approved. Use POST /api/workflows/resume/{workflow_id} to execute Stage 3.',
+                'resume_url': f'/api/workflows/resume/{workflow_id}'
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to approve review: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to approve review: {str(e)}")
+
+
+@app.post("/api/reviews/{workflow_id}/reject")
+async def reject_review(workflow_id: str, request: ReviewUpdateRequest):
+    """
+    Reject a workflow review.
+
+    Path Parameters:
+        workflow_id: Workflow identifier
+
+    Request Body:
+        reviewed_by: Optional email/ID of reviewer
+        review_notes: Optional rejection reason/notes
+
+    Marks the review as rejected. The workflow will not proceed to Stage 3.
+    """
+    # Verify review manager
+    if 'review_manager' not in app_state or app_state['review_manager'] is None:
+        raise HTTPException(status_code=503, detail="ReviewStateManager not initialized")
+
+    if not app_state['review_manager'].is_available():
+        raise HTTPException(status_code=503, detail="Firestore not available")
+
+    # Verify review exists
+    review_state = app_state['review_manager'].get_review_state(workflow_id)
+    if not review_state:
+        raise HTTPException(status_code=404, detail=f"Review not found: {workflow_id}")
+
+    # Update review status to rejected
+    try:
+        success = app_state['review_manager'].update_review_status(
+            workflow_id=workflow_id,
+            status=ReviewStatus.REJECTED,
+            reviewed_by=request.reviewed_by,
+            review_notes=request.review_notes
+        )
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update review status")
+
+        return standard_response(
+            success=True,
+            data={
+                'workflow_id': workflow_id,
+                'review_status': 'rejected',
+                'message': 'Review rejected. Workflow will not proceed to Stage 3.'
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to reject review: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to reject review: {str(e)}")
+
+
+@app.post("/api/workflows/resume/{workflow_id}", status_code=202)
+async def resume_workflow(workflow_id: str, background_tasks: BackgroundTasks):
+    """
+    Resume an approved workflow to execute Stage 3 (brief generation).
+
+    Path Parameters:
+        workflow_id: Workflow identifier (must have approved review)
+
+    Loads the approved Stage 1-2 outputs from Firestore and executes
+    Stage 3 to generate campaign briefs.
+
+    Returns a job_id for tracking the resume workflow status.
+    """
+    # Verify required components
+    if 'calendar_agent' not in app_state or app_state['calendar_agent'] is None:
+        raise HTTPException(status_code=503, detail="CalendarAgent not initialized")
+
+    if 'review_manager' not in app_state or app_state['review_manager'] is None:
+        raise HTTPException(status_code=503, detail="ReviewStateManager not initialized")
+
+    if not app_state['review_manager'].is_available():
+        raise HTTPException(status_code=503, detail="Firestore not available")
+
+    # Verify review exists and is approved
+    review_state = app_state['review_manager'].get_review_state(workflow_id)
+    if not review_state:
+        raise HTTPException(status_code=404, detail=f"Review not found: {workflow_id}")
+
+    if review_state.get('review_status') != ReviewStatus.APPROVED.value:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Review must be approved before resuming. Current status: {review_state.get('review_status')}"
+        )
+
+    # Generate job ID for resume
+    job_id = f"{workflow_id}_resume_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+
+    # Initialize job status
+    app_state['workflow_status'][job_id] = {
+        'job_id': job_id,
+        'status': 'queued',
+        'workflow_id': workflow_id,
+        'workflow_type': 'resume',
+        'created_at': datetime.utcnow().isoformat(),
+        'updated_at': datetime.utcnow().isoformat()
+    }
+
+    # Start background task for Stage 3
+    background_tasks.add_task(
+        execute_resume_workflow_background,
+        job_id=job_id,
+        workflow_id=workflow_id,
+        calendar_agent=app_state['calendar_agent'],
+        review_manager=app_state['review_manager']
+    )
+
+    return standard_response(
+        success=True,
+        data={
+            'job_id': job_id,
+            'workflow_id': workflow_id,
+            'message': 'Resume workflow started (Stage 3 - brief generation).',
+            'status_url': f'/api/workflows/status/{job_id}'
+        }
     )
 
 
@@ -607,7 +1050,13 @@ async def get_output(output_type: str):
     """
     Retrieve workflow outputs from GCS or local files.
 
-    Types: planning, calendar, briefs
+    Types:
+    - planning: Campaign planning document
+    - calendar-detailed: Detailed v4.0.0 format calendar (for brief generation)
+    - calendar-simplified: Simplified upload format calendar
+    - calendar-app: App-specific format calendar
+    - calendar: All calendar files (backward compatibility)
+    - briefs: Campaign briefs document
     """
     try:
         # Try GCS first if available (production)
@@ -645,9 +1094,22 @@ async def get_output(output_type: str):
             )
 
         # Find latest output file of the requested type
-        pattern = f"*_{output_type}_*.txt" if output_type == "planning" else \
-                  f"*_{output_type}_*.json" if output_type == "calendar" else \
-                  f"*_{output_type}_*.txt"
+        if output_type == "planning":
+            pattern = f"*_{output_type}_*.txt"
+        elif output_type == "briefs":
+            pattern = f"*_{output_type}_*.txt"
+        elif output_type == "calendar-detailed":
+            pattern = "*_calendar_detailed_*.json"
+        elif output_type == "calendar-simplified":
+            pattern = "*_calendar_simplified_*.json"
+        elif output_type == "calendar-app":
+            pattern = "*_calendar_app_*.json"
+        elif output_type == "calendar":
+            # Backward compatibility - matches any calendar file
+            pattern = "*_calendar*.json"
+        else:
+            # Generic fallback
+            pattern = f"*_{output_type}_*.*"
 
         output_files = list(outputs_dir.glob(pattern))
 

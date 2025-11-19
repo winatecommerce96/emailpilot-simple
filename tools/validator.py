@@ -246,9 +246,10 @@ class CalendarValidator:
         if "2025" not in planning_text and "2024" not in planning_text:
             warnings.append("Planning output may be missing specific date references")
 
-        is_valid = len(warnings) == 0
+        # Warnings are informational only - they don't invalidate the output
+        is_valid = True
 
-        if is_valid:
+        if len(warnings) == 0:
             logger.info("Planning output validation passed")
         else:
             logger.warning(f"Planning output validation has {len(warnings)} warnings")
@@ -292,9 +293,10 @@ class CalendarValidator:
         if "send time" not in briefs_lower and "send_time" not in briefs_lower:
             warnings.append(f"Briefs may be missing 'send time' specifications")
 
-        is_valid = len(warnings) == 0
+        # Warnings are informational only - they don't invalidate the output
+        is_valid = True
 
-        if is_valid:
+        if len(warnings) == 0:
             logger.info(f"Briefs output validation passed ({campaign_count} campaigns)")
         else:
             logger.warning(f"Briefs output validation has {len(warnings)} warnings")

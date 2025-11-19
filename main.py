@@ -118,7 +118,7 @@ Examples:
 def load_config():
     """Load configuration from environment variables."""
     config = {
-        'anthropic_api_key': os.getenv('ANTHROPIC_API_KEY'),
+        'anthropic_api_key': os.getenv('ANTHROPIC_API_KEY') or os.getenv('ANTHROPIC_DOC_TO_ASANA_KEY'),
         'google_cloud_project': os.getenv('GOOGLE_CLOUD_PROJECT'),
         'openai_api_key': os.getenv('OPENAI_API_KEY'),
     }

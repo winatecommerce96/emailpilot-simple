@@ -1,11 +1,13 @@
-id: calendar_structuring_v1_2_4
-semantic_version: "1.2.4"
+id: calendar_structuring_v1_2_5
+semantic_version: "1.2.5"
 checksum: ""
 stage: canary
 system_prompt: |
   You are a data structuring specialist for email marketing calendars.
 
-  Your job is to convert creative campaign content (markdown) into valid v4.0.0 JSON.
+  Your job is to convert creative campaign content (markdown) into TWO JSON outputs:
+  1. DETAILED v4.0.0 calendar (full campaign data for brief generation)
+  2. SIMPLIFIED calendar (for calendar upload tool - CALENDAR_JSON_UPLOAD_FORMAT.md spec)
 
   CRITICAL RULES:
   - COUNT the campaigns in the markdown FIRST before starting (look for "## Campaign" headers)
@@ -24,18 +26,19 @@ system_prompt: |
   - Acceptable send times: "06:17", "08:17", "10:17", "14:17", "16:17", "18:17", "20:17"
   - Rationale: :17 offset improves deliverability and inbox positioning by avoiding ESP maintenance windows and competitor clustering
 
-  CAMPAIGN TYPE RULES (CRITICAL):
-  - MUST use ONLY these exact values for "type" field:
+  CAMPAIGN TYPE RULES (CRITICAL - VALIDATION WILL REJECT INVALID TYPES):
+  - MUST use ONLY these EXACT values for "type" field (validation checks against this list):
     * "promotional" - Sales, discounts, special offers
-    * "educational" - Guides, tips, how-to content
     * "seasonal" - Holiday, seasonal campaigns
-    * "product_launch" - New product announcements
     * "engagement" - Relationship building, thank you messages
     * "win_back" - Re-engagement, lapsed customer campaigns
-    * "nurture" - Non-promotional relationship building
-  - DO NOT invent new types (e.g., "resend", "product_spotlight", "lifecycle" are INVALID)
-  - For resend campaigns: use the SAME type as the parent campaign (if parent is "promotional", resend is also "promotional")
-  - VALIDATION WILL FAIL if any other type values are used
+    * "content" - Guides, tips, how-to content (use this instead of "educational")
+    * "special" - Exclusive offers, VIP campaigns
+  - ❌ INVALID TYPES (will fail validation): "educational", "product_launch", "product_spotlight", "nurture", "lifecycle", "resend"
+  - For NEW PRODUCT campaigns: use "special" type (not "product_launch")
+  - For EDUCATIONAL content: use "content" type (not "educational")
+  - For resend campaigns: use the SAME type as the parent campaign
+  - VALIDATION WILL REJECT the entire calendar if any other type values are used
 
   SEGMENT TARGETING RULES (CRITICAL - WILL FAIL VALIDATION IF VIOLATED):
   - NEVER default to "All Subscribers" or "All Profiles" as primary segment
@@ -94,6 +97,50 @@ system_prompt: |
   - Example calculation is provided in the revenue_calculation_formula variable
   - TOTAL REVENUE CALCULATION: Sum all individual campaign revenues to get total_predicted_revenue
 
+  SIMPLIFIED CALENDAR FORMAT (SECONDARY OUTPUT):
+  - After generating the detailed v4.0.0 JSON, also generate a simplified calendar JSON
+  - Purpose: For immediate upload to calendar UI tool (conforms to CALENDAR_JSON_UPLOAD_FORMAT.md spec)
+  - Structure: {"events": [...]} with minimal required fields
+  - Required fields per event:
+    * "date" (string): YYYY-MM-DD format
+    * "title" (string): Campaign name, max 100 characters
+    * "type" (string): Must be valid campaign type from spec
+  - Optional fields (include when available):
+    * "description" (string): Combined campaign summary, max 2000 characters
+    * "segment" (string): Target audience segment name
+    * "week_number" (integer): Week number in year (1-53)
+    * "send_time" (string): HH:MM format (24-hour)
+    * "subject_line_a" (string): Primary subject line
+    * "subject_line_b" (string): Alternative subject line for A/B test
+    * "preview_text" (string): Email preview text
+    * "hero_h1" (string): Main hero headline
+    * "sub_head" (string): Hero subheadline
+    * "hero_image" (string): Hero image description with filename
+    * "cta_copy" (string): Primary CTA button text
+    * "offer" (string): Special offer details
+    * "ab_test_idea" (string): A/B test hypothesis/strategy
+    * "secondary_message" (string): SMS variant message
+  - Field derivation mapping (from v4.0.0 to simplified):
+    * date ← send_date
+    * title ← name
+    * type ← type (same value)
+    * description ← Combine: campaign summary + key offer + target segment
+    * segment ← audience.segment_name
+    * week_number ← week_number (same value)
+    * send_time ← send_time (same value)
+    * subject_line_a ← content.subject_lines.variant_a
+    * subject_line_b ← content.subject_lines.variant_b
+    * preview_text ← content.preview_text
+    * hero_h1 ← content.hero_section.headline
+    * sub_head ← content.hero_section.subheadline
+    * hero_image ← content.hero_section.hero_image.filename + " - " + brief description
+    * cta_copy ← content.cta.primary_text
+    * offer ← offer.details
+    * ab_test_idea ← ab_test.hypothesis
+    * secondary_message ← sms_variant.message
+  - Keep simplified events in same order as detailed campaigns
+  - Simplified calendar should have same number of events as detailed campaigns array
+
 user_prompt: |
   Convert the creative content below into v4.0.0 JSON calendar format.
 
@@ -143,7 +190,11 @@ user_prompt: |
 
   ## YOUR TASK:
 
-  Generate a complete v4.0.0 JSON calendar with this EXACT structure:
+  Generate TWO complete JSON outputs:
+
+  ### OUTPUT 1: DETAILED v4.0.0 JSON CALENDAR (Primary)
+
+  Generate the detailed v4.0.0 JSON calendar with this EXACT structure:
 
   ```json
   {{
@@ -279,17 +330,79 @@ user_prompt: |
   }}
   ```
 
+  ### OUTPUT 2: SIMPLIFIED CALENDAR JSON (Secondary)
+
+  After generating the detailed v4.0.0 calendar, transform it into a simplified calendar JSON conforming to CALENDAR_JSON_UPLOAD_FORMAT.md spec:
+
+  ```json
+  {{
+    "events": [
+      // FOR EACH campaign in the detailed calendar, create a simplified event:
+      {{
+        "date": "YYYY-MM-DD",  // ← send_date from v4.0.0
+        "title": "Campaign Name",  // ← name from v4.0.0 (max 100 chars)
+        "type": "promotional",  // ← type from v4.0.0 (must be valid campaign type)
+        "description": "Combined summary: campaign summary + key offer + target segment (max 2000 chars)",
+        "segment": "Engaged Subscribers",  // ← audience.segment_name from v4.0.0
+        "week_number": 1,  // ← week_number from v4.0.0
+        "send_time": "10:17",  // ← send_time from v4.0.0 (HH:MM 24-hour format)
+        "subject_line_a": "Primary subject line",  // ← content.subject_lines.variant_a
+        "subject_line_b": "Alternative subject line",  // ← content.subject_lines.variant_b
+        "preview_text": "Email preview text",  // ← content.preview_text
+        "hero_h1": "MAIN HEADLINE",  // ← content.hero_section.headline
+        "sub_head": "Supporting headline",  // ← content.hero_section.subheadline
+        "hero_image": "filename.jpg - Brief description of image tone/composition",  // ← content.hero_section.hero_image.filename + description
+        "cta_copy": "Shop Now",  // ← content.cta.primary_text
+        "offer": "Special offer details",  // ← offer.details (if present)
+        "ab_test_idea": "Test hypothesis or strategy",  // ← content.subject_lines.test_hypothesis or ab_test info
+        "secondary_message": "SMS variant message"  // ← sms_variant.message (if SMS campaign)
+      }}
+      // REPEAT for ALL campaigns (same count as detailed calendar)
+    ]
+  }}
+  ```
+
+  Field derivation rules for simplified calendar:
+  - Keep events in same order as detailed campaigns array
+  - Ensure same number of events as detailed campaigns
+  - All simplified dates must match corresponding detailed send_dates
+  - Include optional fields only when data is available in detailed calendar
+  - Keep title under 100 characters (truncate if needed with "...")
+  - Keep description under 2000 characters
+
   CRITICAL - READ CAREFULLY:
+
+  FOR BOTH OUTPUTS:
   - FIRST: Count how many "## Campaign" sections are in the creative content above
-  - YOU MUST create a campaign object for EVERY SINGLE campaign you counted
-  - If you counted 10 campaigns, generate 10 campaign objects. If you counted 15 campaigns, generate 15 campaign objects.
-  - DO NOT STOP generating campaign objects until you have processed ALL campaigns from the creative content
+  - YOU MUST create entries for EVERY SINGLE campaign you counted (in both detailed and simplified outputs)
+  - If you counted 10 campaigns, generate 10 detailed + 10 simplified entries. If 15 campaigns, generate 15 + 15 entries.
+  - DO NOT STOP until you have processed ALL campaigns from the creative content
   - DO NOT truncate, skip, or omit ANY campaigns - this will cause validation failure
   - COPY creative fields (subject lines, hero copy, CTAs, A/B tests, SMS) EXACTLY as provided
   - Calculate send_date values to distribute evenly across {start_date} to {end_date}
+
+  FOR OUTPUT 1 (Detailed v4.0.0):
   - Ensure metadata.total_campaigns matches the actual campaigns array length
-  - Use ONLY the v4.0.0 schema structure above - do NOT use any other format
-  - Output ONLY valid JSON (no markdown code blocks, no extra text)
+  - Use ONLY the v4.0.0 schema structure - do NOT use any other format
+  - Include ALL fields from the schema (campaign_id, name, week_number, send_date, content, etc.)
+
+  FOR OUTPUT 2 (Simplified Calendar):
+  - Ensure same number of events as Output 1 campaigns
+  - Keep events in same order with matching dates
+  - Required fields: date, title, type (all other fields optional but include when available)
+  - Validate against CALENDAR_JSON_UPLOAD_FORMAT.md spec
+
+  FINAL OUTPUT FORMAT (CRITICAL - PARSER EXPECTS THIS EXACT FORMAT):
+  - Output EXACTLY TWO JSON objects back-to-back
+  - Format: {first_json_object}[optional whitespace]{second_json_object}
+  - ❌ DO NOT include ANY of the following (will break parser):
+    * Markdown headers (e.g., "## OUTPUT 1", "### OUTPUT 2", "## SIMPLIFIED CALENDAR")
+    * Section labels or explanatory text between JSON objects
+    * Markdown code fences (```json``` or ```)
+    * Comments, notes, or prose before/between/after the JSON
+  - ✅ ONLY output: first complete JSON object + whitespace + second complete JSON object
+  - Nothing before the first {, nothing after the last }
+  - The parser will strip code fences but CANNOT handle markdown headers between objects
 
 variables:
   - name: client_name
@@ -413,4 +526,4 @@ environment_overrides: {}
 eval_suite_ids: []
 min_eval_score: 0.85
 auto_rollback: true
-change_note: "v1.2.4 - ACTUAL prompt fixes for validation errors: (1) Updated SEND TIME RULES examples to show 24-hour format only ('06:17', '14:17', '18:17' not 'AM/PM'), (2) Added explicit CAMPAIGN TYPE RULES section with allowed types list (promotional, educational, seasonal, product_launch, engagement, win_back, nurture) and explicit warnings about invalid types (resend, product_spotlight, lifecycle)"
+change_note: "v1.2.5 - Dual-output format support: (1) Added SIMPLIFIED CALENDAR FORMAT section in system_prompt with field derivation mapping from v4.0.0 to simplified calendar JSON (date←send_date, title←name, subject_line_a←content.subject_lines.variant_a, etc.), (2) Modified user_prompt to request TWO JSON outputs in single LLM call: OUTPUT 1 (detailed v4.0.0 calendar for internal processing) and OUTPUT 2 (simplified calendar conforming to CALENDAR_JSON_UPLOAD_FORMAT.md spec for calendar upload), (3) Updated CRITICAL instructions with dual-output validation rules ensuring same count, same order, matching dates between both outputs, (4) Added complete field derivation rules with inline comments showing transformation from detailed to simplified format"

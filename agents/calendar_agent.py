@@ -10,6 +10,7 @@ Orchestrates the three-stage calendar generation workflow:
 import yaml
 import json
 import logging
+from datetime import datetime
 from typing import Dict, Any, Optional
 from pathlib import Path
 from anthropic import Anthropic
@@ -328,7 +329,7 @@ class CalendarAgent:
                 import json
                 mcp_data_size = len(json.dumps(mcp_data))
                 logger.debug(f"[Stage 1] Fetched MCP data size: {mcp_data_size:,} bytes")
-                logger.debug(f"[Stage 1] MCP data contains: segments={len(mcp_data.get('segments', []))}, campaigns={len(mcp_data.get('campaigns', []))}, flows={len(mcp_data.get('flows', []))}")
+                logger.debug(f"[Stage 1] MCP data contains: segments={len(mcp_data.get('segments', []))}, campaigns={len(mcp_data.get('campaigns', []))}, flows={len(mcp_data.get('flows', []))}, catalog_items={len(mcp_data.get('catalog_items', []))}")
                 # ✅ Validation happens inside fetch_all_data() now
 
             except (ValueError, RuntimeError) as e:
@@ -385,28 +386,18 @@ class CalendarAgent:
         format_firestore_duration = time.time() - format_firestore_start
         logger.debug(f"[Stage 1] Firestore formatting took {format_firestore_duration:.2f}s ({len(firestore_formatted):,} characters)")
 
-        # Extract product catalog separately for prompt template
-        logger.debug(f"[Stage 1] Extracting product catalog...")
-        product_catalog_data = rag_data.get("product_catalog")
-        if product_catalog_data:
-            if isinstance(product_catalog_data, dict) and "products" in product_catalog_data:
-                # For .txt files: extract the text content from {"products": "text"}
-                product_catalog_formatted = product_catalog_data["products"]
-                logger.debug(f"[Stage 1] Product catalog format: dict with 'products' key (text file)")
-            elif isinstance(product_catalog_data, dict):
-                # For .json files: convert to formatted JSON string
-                product_catalog_formatted = json.dumps(product_catalog_data, indent=2)
-                logger.debug(f"[Stage 1] Product catalog format: dict (JSON file)")
-            else:
-                # Fallback to string conversion
-                product_catalog_formatted = str(product_catalog_data)
-                logger.debug(f"[Stage 1] Product catalog format: other ({type(product_catalog_data).__name__})")
-            logger.info(f"Product catalog extracted: {len(product_catalog_formatted)} characters")
-            logger.debug(f"[Stage 1] Product catalog size: {len(product_catalog_formatted):,} characters")
+        # Extract product catalog from MCP data
+        logger.debug(f"[Stage 1] Extracting product catalog from MCP...")
+        catalog_items = mcp_data.get("catalog_items", [])
+        if catalog_items and len(catalog_items) > 0:
+            # Convert MCP catalog items to formatted JSON string for prompt
+            product_catalog_formatted = json.dumps(catalog_items, indent=2)
+            logger.info(f"Product catalog extracted from MCP: {len(catalog_items)} items, {len(product_catalog_formatted)} characters")
+            logger.debug(f"[Stage 1] MCP catalog items: {len(catalog_items)}, size: {len(product_catalog_formatted):,} characters")
         else:
             product_catalog_formatted = "No product catalog available for this client."
-            logger.warning(f"No product catalog found for {client_name}")
-            logger.debug(f"[Stage 1] No product catalog available")
+            logger.warning(f"No catalog items found in MCP data for {client_name}")
+            logger.debug(f"[Stage 1] No MCP catalog items available")
 
         # Build prompt variables
         logger.debug(f"[Stage 1] Building prompt variables...")
@@ -459,10 +450,11 @@ class CalendarAgent:
         planning_output: str
     ) -> Dict[str, Any]:
         """
-        Stage 2: Structuring - Convert creative calendar to v4.0.0 JSON.
+        Stage 2: Structuring - Convert creative calendar to dual JSON outputs.
 
-        Takes the planning output and converts it to structured JSON format
-        following the v4.0.0 calendar schema.
+        Takes the planning output and generates TWO structured JSON formats:
+        1. Detailed v4.0.0 calendar (for internal processing and brief generation)
+        2. Simplified calendar (conforming to CALENDAR_JSON_UPLOAD_FORMAT.md spec)
 
         Args:
             client_name: Client slug
@@ -472,7 +464,11 @@ class CalendarAgent:
             planning_output: Output from Stage 1
 
         Returns:
-            Structured calendar JSON (as dict)
+            Dict containing both outputs:
+            {
+                "detailed_calendar": {...},  # v4.0.0 format
+                "simplified_calendar": {...}  # Upload format
+            }
         """
         import time
         stage_start = time.time()
@@ -491,11 +487,20 @@ class CalendarAgent:
 
         # Build prompt variables
         logger.debug(f"[Stage 2] Building prompt variables...")
+
+        # Fetch segment data from MCP
+        logger.debug(f"[Stage 2] Fetching segment data from MCP...")
+        mcp_data = await self.mcp.fetch_all_data(client_name, start_date, end_date)
+        segments = mcp_data.get("segments", [])
+        segment_list = ", ".join([seg.get("name", "Unknown") for seg in segments])
+        logger.debug(f"[Stage 2] Found {len(segments)} segments for segment_list")
+
         variables = {
             "client_name": client_name,
             "start_date": start_date,
             "end_date": end_date,
-            "planning_output": planning_output
+            "creative_content": planning_output,
+            "segment_list": segment_list
         }
         logger.debug(f"[Stage 2] Prompt variables: {len(variables)} total")
 
@@ -523,77 +528,182 @@ class CalendarAgent:
 
         logger.info(f"Stage 2: Structuring complete ({len(structuring_output)} characters)")
 
-        # Parse JSON from output
+        # Parse dual JSON outputs
         import json
         import re
+        from tools.calendar_format_validator import validate_calendar_data
 
-        logger.debug(f"[Stage 2] Parsing JSON from output...")
+        logger.debug(f"[Stage 2] Parsing dual JSON outputs from response...")
 
-        # Extract JSON from markdown code blocks if present
-        # More robust extraction that handles various fence formats
-        json_str = structuring_output.strip()
+        # Extract content from markdown fences if present
+        content = structuring_output.strip()
 
-        # Check if response starts with markdown fence
-        if json_str.startswith('```'):
-            logger.debug(f"[Stage 2] Detected markdown code fence in response")
-            # Find the first newline after opening fence (skip language identifier)
-            first_newline = json_str.find('\n')
+        # Remove markdown fences if present
+        if content.startswith('```'):
+            logger.debug(f"[Stage 2] Detected markdown code fence - extracting content")
+            first_newline = content.find('\n')
             if first_newline != -1:
-                # Find closing fence in the substring AFTER first newline
-                closing_fence_relative = json_str[first_newline:].rfind('```')
+                closing_fence_relative = content[first_newline:].rfind('```')
                 if closing_fence_relative != -1:
-                    # Convert relative position to absolute position
                     closing_fence = first_newline + closing_fence_relative
-                    # Extract content between fences
-                    json_str = json_str[first_newline + 1:closing_fence].strip()
-                    logger.info(f"Extracted JSON from markdown code fence ({len(json_str)} characters)")
-                    logger.debug(f"[Stage 2] Extracted JSON size: {len(json_str):,} characters")
+                    content = content[first_newline + 1:closing_fence].strip()
+                    logger.debug(f"[Stage 2] Extracted content size: {len(content):,} characters")
                 else:
-                    # No closing fence - likely truncated output
-                    logger.warning("Found opening fence but no closing fence - assuming truncation")
-                    logger.debug(f"[Stage 2] No closing fence found - potential truncation")
-                    # Extract everything after the first newline (remove opening fence)
-                    json_str = json_str[first_newline + 1:].strip()
-                    logger.warning(f"Attempting to parse potentially incomplete JSON ({len(json_str)} characters)")
-                    logger.debug(f"[Stage 2] Attempting incomplete JSON parse: {len(json_str):,} characters")
+                    # No closing fence - remove opening fence only
+                    content = content[first_newline + 1:].strip()
+                    logger.warning(f"[Stage 2] No closing fence - attempting to parse content")
             else:
-                logger.warning("Found opening fence but no newline - unexpected format")
-                logger.debug(f"[Stage 2] Unexpected fence format - no newline after opening fence")
-                # Try to extract JSON anyway (remove opening fence)
-                json_str = json_str[3:].strip()
-        else:
-            logger.debug(f"[Stage 2] No markdown fence detected - parsing raw response")
+                content = content[3:].strip()
 
         parse_start = time.time()
+
         try:
-            calendar_json = json.loads(json_str)
+            # Strategy: Parse TWO consecutive JSON objects
+            # The response should contain two complete JSON objects back-to-back
+
+            # Strip markdown code fences if present
+            # Claude sometimes wraps JSON in ```json ... ```
+            import re
+            content = re.sub(r'```json\s*', '', content)
+            content = re.sub(r'```\s*', '', content)
+            logger.debug(f"[Stage 2] Stripped markdown code fences from content")
+
+            logger.debug(f"[Stage 2] Attempting to parse first JSON (detailed calendar)...")
+
+            # Extract JSON from content that may have explanatory text
+            # Claude sometimes returns text like "Here is the JSON:" before the actual JSON
+            json_start = content.find('{')
+            if json_start == -1:
+                json_start = content.find('[')
+
+            if json_start == -1:
+                logger.error(f"[Stage 2] No JSON object or array found in content")
+                logger.error(f"[Stage 2] Content preview (first 500 chars): {content[:500]}")
+                raise ValueError("No JSON object or array found in LLM response")
+
+            # Log skipped text only if there was text before the JSON
+            if json_start > 0:
+                skipped_text = content[:json_start].strip()
+                logger.debug(f"[Stage 2] Found JSON starting at position {json_start}, skipping {json_start} characters of explanatory text")
+                logger.debug(f"[Stage 2] Skipped text: {skipped_text[:200]}")
+
+            # Always slice to JSON start and strip leading whitespace (even when json_start == 0)
+            content = content[json_start:].lstrip()
+            logger.debug(f"[Stage 2] Content after slicing starts with: {content[:50]!r}")
+
+            # Parse first JSON object (detailed v4.0.0 calendar)
+            # Track which JSON parsing stage for accurate error context
+            parsing_stage = "first"
+            parsing_source = content
+            decoder = json.JSONDecoder()
+            detailed_calendar, idx = decoder.raw_decode(content)
+
+            logger.debug(f"[Stage 2] First JSON parsed successfully (ended at position {idx})")
+            campaign_count = len(detailed_calendar.get('campaigns', []))
+            logger.debug(f"[Stage 2] Detailed calendar contains {campaign_count} campaigns")
+
+            # Skip whitespace between JSON objects
+            remaining = content[idx:].lstrip()
+
+            if not remaining:
+                # No second JSON found - handle gracefully
+                logger.warning(f"[Stage 2] No second JSON found - only detailed calendar present")
+                logger.warning(f"[Stage 2] This may indicate prompt did not generate simplified calendar")
+
+                # Return with only detailed calendar (backward compatibility)
+                stage_total_duration = time.time() - stage_start
+                logger.debug(f"[Stage 2] Total stage duration: {stage_total_duration:.2f}s")
+                logger.debug(f"[Stage 2] End timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+                return {
+                    "detailed_calendar": detailed_calendar,
+                    "simplified_calendar": None,
+                    "warning": "Simplified calendar not generated by prompt"
+                }
+
+            logger.debug(f"[Stage 2] Attempting to parse second JSON (simplified calendar)...")
+            logger.debug(f"[Stage 2] Remaining content size: {len(remaining):,} characters")
+
+            # Parse second JSON object (simplified calendar)
+            # Update tracking for second JSON parsing
+            parsing_stage = "second"
+            parsing_source = remaining
+            simplified_calendar, _ = decoder.raw_decode(remaining)
+
             parse_duration = time.time() - parse_start
-            logger.info(f"Successfully parsed calendar JSON")
+            logger.info(f"Successfully parsed dual JSON outputs")
             logger.debug(f"[Stage 2] JSON parsing took {parse_duration:.2f}s")
 
-            # Log JSON structure details
-            campaign_count = len(calendar_json.get('campaigns', []))
-            logger.debug(f"[Stage 2] Parsed calendar contains {campaign_count} campaigns")
+            # Validate simplified calendar format
+            logger.debug(f"[Stage 2] Validating simplified calendar format...")
+            validation_start = time.time()
+            is_valid, errors, warnings = validate_calendar_data(simplified_calendar)
+            validation_duration = time.time() - validation_start
+
+            if is_valid:
+                logger.info(f"Simplified calendar validation passed")
+                logger.debug(f"[Stage 2] Validation took {validation_duration:.2f}s")
+                if warnings:
+                    logger.warning(f"Simplified calendar has {len(warnings)} warnings:")
+                    for warning in warnings[:5]:  # Log first 5 warnings
+                        logger.warning(f"  - {warning}")
+                    if len(warnings) > 5:
+                        logger.warning(f"  ... and {len(warnings) - 5} more warnings")
+            else:
+                logger.error(f"Simplified calendar validation failed with {len(errors)} errors:")
+                for error in errors[:10]:  # Log first 10 errors
+                    logger.error(f"  - {error}")
+                if len(errors) > 10:
+                    logger.error(f"  ... and {len(errors) - 10} more errors")
+
+            # Extract event count from simplified calendar
+            simplified_events = simplified_calendar.get('events', [])
+            if not isinstance(simplified_events, list):
+                # Try alternative key names
+                if 'calendar' in simplified_calendar:
+                    simplified_events = simplified_calendar.get('calendar', [])
+                else:
+                    simplified_events = []
+
+            event_count = len(simplified_events) if isinstance(simplified_events, list) else 0
+            logger.debug(f"[Stage 2] Simplified calendar contains {event_count} events")
+
+            # Verify counts match between detailed and simplified
+            if campaign_count != event_count:
+                logger.warning(
+                    f"[Stage 2] Count mismatch: detailed calendar has {campaign_count} campaigns "
+                    f"but simplified calendar has {event_count} events"
+                )
 
             stage_total_duration = time.time() - stage_start
             logger.debug(f"[Stage 2] Total stage duration: {stage_total_duration:.2f}s")
             logger.debug(f"[Stage 2] End timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-            return calendar_json
+            # Return both outputs
+            result = {
+                "detailed_calendar": detailed_calendar,
+                "simplified_calendar": simplified_calendar,
+                "validation": {
+                    "is_valid": is_valid,
+                    "errors": errors,
+                    "warnings": warnings
+                }
+            }
+
+            return result
 
         except json.JSONDecodeError as e:
             parse_duration = time.time() - parse_start
-            logger.error(f"Failed to parse calendar JSON: {str(e)}")
+            logger.error(f"Failed to parse JSON: {str(e)}")
             logger.error(f"JSON parse error at position {e.pos}: {e.msg}")
             logger.debug(f"[Stage 2] JSON parsing failed after {parse_duration:.2f}s")
-            logger.debug(f"[Stage 2] Error position: {e.pos}, Error message: {e.msg}")
 
             # Try to provide helpful error context
-            if e.pos is not None and len(json_str) > e.pos:
+            if e.pos is not None and len(parsing_source) > e.pos:
                 context_start = max(0, e.pos - 100)
-                context_end = min(len(json_str), e.pos + 100)
-                error_context = json_str[context_start:context_end]
-                logger.error(f"Error context: ...{error_context}...")
+                context_end = min(len(parsing_source), e.pos + 100)
+                error_context = parsing_source[context_start:context_end]
+                logger.error(f"Error context ({parsing_stage} JSON): ...{error_context}...")
                 logger.debug(f"[Stage 2] Error context window: chars {context_start} to {context_end}")
 
             stage_total_duration = time.time() - stage_start
@@ -607,7 +717,23 @@ class CalendarAgent:
                 "error_message": str(e),
                 "error_position": e.pos,
                 "output_length": len(structuring_output),
-                "json_length": len(json_str),
+                "content_length": len(content),
+                "raw_output": structuring_output
+            }
+
+        except Exception as e:
+            parse_duration = time.time() - parse_start
+            logger.error(f"Unexpected error during JSON parsing: {str(e)}")
+            logger.debug(f"[Stage 2] Unexpected error after {parse_duration:.2f}s: {type(e).__name__}")
+
+            stage_total_duration = time.time() - stage_start
+            logger.debug(f"[Stage 2] Total stage duration (with error): {stage_total_duration:.2f}s")
+
+            return {
+                "error": "Unexpected parsing error",
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "output_length": len(structuring_output),
                 "raw_output": structuring_output
             }
 
@@ -693,29 +819,19 @@ class CalendarAgent:
         format_duration = time.time() - format_start
         logger.debug(f"[Stage 3] Data formatting took {format_duration:.2f}s")
 
-        # Extract product catalog separately for prompt template
-        logger.debug(f"[Stage 3] Extracting product catalog...")
+        # Extract product catalog from MCP data (same as Stage 1)
+        logger.debug(f"[Stage 3] Extracting product catalog from MCP...")
         catalog_extract_start = time.time()
-        product_catalog_data = rag_data.get("product_catalog")
-        if product_catalog_data:
-            if isinstance(product_catalog_data, dict) and "products" in product_catalog_data:
-                # For .txt files: extract the text content from {"products": "text"}
-                product_catalog_formatted = product_catalog_data["products"]
-                logger.debug(f"[Stage 3] Product catalog extracted from dict['products']")
-            elif isinstance(product_catalog_data, dict):
-                # For .json files: convert to formatted JSON string
-                product_catalog_formatted = json.dumps(product_catalog_data, indent=2)
-                logger.debug(f"[Stage 3] Product catalog converted from JSON dict")
-            else:
-                # Fallback to string conversion
-                product_catalog_formatted = str(product_catalog_data)
-                logger.debug(f"[Stage 3] Product catalog converted to string (fallback)")
-            logger.info(f"Product catalog extracted for briefs: {len(product_catalog_formatted)} characters")
-            logger.debug(f"[Stage 3] Product catalog size: {len(product_catalog_formatted):,} characters")
+        catalog_items = mcp_data.get("catalog_items", []) if mcp_data else []
+        if catalog_items and len(catalog_items) > 0:
+            # Convert MCP catalog items to formatted JSON string for prompt
+            product_catalog_formatted = json.dumps(catalog_items, indent=2)
+            logger.info(f"Product catalog extracted from MCP: {len(catalog_items)} items, {len(product_catalog_formatted)} characters")
+            logger.debug(f"[Stage 3] MCP catalog items: {len(catalog_items)}, size: {len(product_catalog_formatted):,} characters")
         else:
             product_catalog_formatted = "No product catalog available for this client."
-            logger.warning(f"No product catalog found for {client_name} briefs stage")
-            logger.debug(f"[Stage 3] No product catalog found - using placeholder")
+            logger.warning(f"No catalog items found in MCP data for {client_name} briefs stage")
+            logger.debug(f"[Stage 3] No MCP catalog items available")
 
         catalog_extract_duration = time.time() - catalog_extract_start
         logger.debug(f"[Stage 3] Product catalog extraction took {catalog_extract_duration:.2f}s")
@@ -800,36 +916,295 @@ class CalendarAgent:
                 client_name, start_date, end_date, workflow_id
             )
 
-            # Stage 2: Structuring
-            calendar_json = await self.stage_2_structuring(
+            # Stage 2: Structuring (returns dual outputs)
+            stage_2_output = await self.stage_2_structuring(
                 client_name, start_date, end_date, workflow_id, planning_output
             )
 
-            # Stage 3: Brief Generation
+            # Extract both calendar formats from stage 2
+            detailed_calendar = stage_2_output.get("detailed_calendar")
+            simplified_calendar = stage_2_output.get("simplified_calendar")
+            stage_2_validation = stage_2_output.get("validation", {})
+
+            # EXTRACT STRATEGY SUMMARY from detailed_calendar.metadata
+            strategy_summary = None
+            if detailed_calendar and "metadata" in detailed_calendar:
+                strategy_summary = detailed_calendar["metadata"].get("strategy_summary")
+
+                if strategy_summary:
+                    logger.info(f"✓ Extracted Strategy Summary with {len(strategy_summary.get('key_insights', []))} insights")
+                else:
+                    logger.warning("⚠ Strategy Summary not found in detailed_calendar.metadata")
+
+            # Validate stage 2 output before proceeding
+            if detailed_calendar is None:
+                error_msg = f"Stage 2 failed to produce valid calendar JSON for {client_name}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+
+            # Stage 3: Brief Generation (uses detailed calendar)
             briefs_output = await self.stage_3_briefs(
-                client_name, workflow_id, calendar_json
+                client_name, workflow_id, detailed_calendar
             )
 
-            # Compile final output
+            # Compile final output with both calendar formats
             result = {
                 "planning": planning_output,
-                "calendar_json": calendar_json,
+                "detailed_calendar": detailed_calendar,
+                "simplified_calendar": simplified_calendar,
+                "calendar_json": detailed_calendar,  # Backward compatibility
                 "briefs": briefs_output,
+                "strategy_summary": strategy_summary,
+                "stage_2_validation": stage_2_validation,
                 "metadata": {
                     "client_name": client_name,
                     "start_date": start_date,
                     "end_date": end_date,
                     "model": self.model,
-                    "workflow_id": workflow_id
+                    "workflow_id": workflow_id,
+                    "has_strategy_summary": strategy_summary is not None
                 }
             }
 
             logger.info(f"Workflow {workflow_id} completed successfully")
+            logger.info(f"Generated detailed calendar ({len(detailed_calendar.get('campaigns', []))} campaigns)")
+            logger.info(f"Generated simplified calendar ({len(simplified_calendar.get('events', []))} events)")
 
             return result
 
         except Exception as e:
             logger.error(f"Workflow {workflow_id} failed: {str(e)}")
+            raise
+
+    async def run_workflow_with_checkpoint(
+        self,
+        client_name: str,
+        start_date: str,
+        end_date: str,
+        review_manager: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Run workflow through Stage 1-2, then save state for manual review.
+
+        This enables the "checkpoint" workflow pattern where execution pauses
+        after Stage 2 to allow human review/approval before proceeding to Stage 3.
+
+        Args:
+            client_name: Client slug
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            review_manager: ReviewStateManager instance (optional)
+
+        Returns:
+            Workflow output through Stage 2:
+            {
+                "workflow_id": str,
+                "planning": str,
+                "detailed_calendar": dict,
+                "simplified_calendar": dict,
+                "stage_2_validation": dict,
+                "review_status": "pending",
+                "metadata": dict
+            }
+        """
+        workflow_id = f"{client_name}_{start_date}_{end_date}"
+
+        logger.info(f"Starting checkpoint workflow {workflow_id}")
+        logger.info(f"Model: {self.model}")
+
+        try:
+            # Stage 1: Planning
+            planning_output = await self.stage_1_planning(
+                client_name, start_date, end_date, workflow_id
+            )
+
+            # Stage 2: Structuring (returns dual outputs)
+            stage_2_output = await self.stage_2_structuring(
+                client_name, start_date, end_date, workflow_id, planning_output
+            )
+
+            # Extract both calendar formats
+            detailed_calendar = stage_2_output.get("detailed_calendar")
+            simplified_calendar = stage_2_output.get("simplified_calendar")
+            stage_2_validation = stage_2_output.get("validation", {})
+
+            # EXTRACT STRATEGY SUMMARY from detailed_calendar.metadata
+            strategy_summary = None
+            if detailed_calendar and "metadata" in detailed_calendar:
+                strategy_summary = detailed_calendar["metadata"].get("strategy_summary")
+
+                if strategy_summary:
+                    logger.info(f"✓ Extracted Strategy Summary with {len(strategy_summary.get('key_insights', []))} insights")
+                else:
+                    logger.warning("⚠ Strategy Summary not found in detailed_calendar.metadata")
+
+            # Save review state to Firestore if manager provided
+            if review_manager and review_manager.is_available():
+                logger.info(f"Saving review state to Firestore: {workflow_id}")
+
+                metadata = {
+                    "model": self.model,
+                    "checkpoint_created_at": datetime.utcnow().isoformat()
+                }
+
+                saved = review_manager.save_review_state(
+                    workflow_id=workflow_id,
+                    client_name=client_name,
+                    start_date=start_date,
+                    end_date=end_date,
+                    planning_output=planning_output,
+                    detailed_calendar=detailed_calendar,
+                    simplified_calendar=simplified_calendar,
+                    validation_results=stage_2_validation,
+                    metadata=metadata
+                )
+
+                if saved:
+                    logger.info(f"Review state saved successfully: {workflow_id}")
+                else:
+                    logger.warning(f"Failed to save review state: {workflow_id}")
+
+            # Return checkpoint result
+            result = {
+                "workflow_id": workflow_id,
+                "planning": planning_output,
+                "detailed_calendar": detailed_calendar,
+                "simplified_calendar": simplified_calendar,
+                "strategy_summary": strategy_summary,
+                "stage_2_validation": stage_2_validation,
+                "review_status": "pending",
+                "metadata": {
+                    "client_name": client_name,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "model": self.model,
+                    "workflow_id": workflow_id,
+                    "checkpoint_at": "stage_2",
+                    "has_strategy_summary": strategy_summary is not None
+                }
+            }
+
+            logger.info(f"Checkpoint workflow {workflow_id} completed - awaiting review")
+
+            # Log calendar generation results with null safety
+            if detailed_calendar:
+                logger.info(f"Generated detailed calendar ({len(detailed_calendar.get('campaigns', []))} campaigns)")
+            else:
+                logger.error("Failed to generate detailed calendar - detailed_calendar is None")
+
+            if simplified_calendar:
+                logger.info(f"Generated simplified calendar ({len(simplified_calendar.get('events', []))} events)")
+            else:
+                logger.error("Failed to generate simplified calendar - simplified_calendar is None")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Checkpoint workflow {workflow_id} failed: {str(e)}")
+            raise
+
+    async def resume_workflow_from_review(
+        self,
+        workflow_id: str,
+        review_manager: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Resume workflow from saved review state and complete Stage 3.
+
+        Loads saved state from Firestore and runs Stage 3 (Brief Generation).
+
+        Args:
+            workflow_id: Workflow identifier
+            review_manager: ReviewStateManager instance (optional)
+
+        Returns:
+            Complete workflow output:
+            {
+                "planning": str,
+                "detailed_calendar": dict,
+                "simplified_calendar": dict,
+                "briefs": str,
+                "review_status": "approved",
+                "metadata": dict
+            }
+
+        Raises:
+            ValueError: If review state not found or not approved
+        """
+        logger.info(f"Resuming workflow from review: {workflow_id}")
+
+        # Load review state from Firestore
+        if not review_manager or not review_manager.is_available():
+            raise ValueError("ReviewStateManager required to resume workflow")
+
+        review_state = review_manager.get_review_state(workflow_id)
+
+        if not review_state:
+            raise ValueError(f"No review state found for workflow: {workflow_id}")
+
+        # Check review status
+        review_status = review_state.get("review_status")
+        if review_status != "approved":
+            raise ValueError(
+                f"Workflow {workflow_id} not approved. Current status: {review_status}"
+            )
+
+        # Extract saved data
+        client_name = review_state.get("client_name")
+        detailed_calendar = review_state.get("detailed_calendar")
+        simplified_calendar = review_state.get("simplified_calendar")
+        planning_output = review_state.get("planning_output")
+        stage_2_validation = review_state.get("validation_results", {})
+
+        # EXTRACT STRATEGY SUMMARY from detailed_calendar.metadata
+        strategy_summary = None
+        if detailed_calendar and "metadata" in detailed_calendar:
+            strategy_summary = detailed_calendar["metadata"].get("strategy_summary")
+
+            if strategy_summary:
+                logger.info(f"✓ Extracted Strategy Summary with {len(strategy_summary.get('key_insights', []))} insights")
+            else:
+                logger.warning("⚠ Strategy Summary not found in detailed_calendar.metadata")
+
+        logger.info(f"Loaded review state for {client_name}")
+        logger.debug(f"Resume: Detailed calendar has {len(detailed_calendar.get('campaigns', []))} campaigns")
+
+        try:
+            # Stage 3: Brief Generation (uses detailed calendar)
+            briefs_output = await self.stage_3_briefs(
+                client_name, workflow_id, detailed_calendar
+            )
+
+            # Compile final output
+            result = {
+                "planning": planning_output,
+                "detailed_calendar": detailed_calendar,
+                "simplified_calendar": simplified_calendar,
+                "calendar_json": detailed_calendar,  # Backward compatibility
+                "strategy_summary": strategy_summary,
+                "briefs": briefs_output,
+                "stage_2_validation": stage_2_validation,
+                "review_status": "approved",
+                "metadata": {
+                    "client_name": client_name,
+                    "start_date": review_state.get("start_date"),
+                    "end_date": review_state.get("end_date"),
+                    "model": self.model,
+                    "workflow_id": workflow_id,
+                    "reviewed_by": review_state.get("reviewed_by"),
+                    "reviewed_at": review_state.get("reviewed_at"),
+                    "review_notes": review_state.get("review_notes"),
+                    "has_strategy_summary": strategy_summary is not None
+                }
+            }
+
+            logger.info(f"Resumed workflow {workflow_id} completed successfully")
+            logger.info(f"Generated briefs ({len(briefs_output)} characters)")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Resumed workflow {workflow_id} failed at Stage 3: {str(e)}")
             raise
 
     def _format_mcp_data(self, mcp_data: Optional[Dict[str, Any]]) -> str:

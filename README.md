@@ -217,10 +217,12 @@ pip install -r requirements.txt
    GOOGLE_CLOUD_PROJECT=your-gcp-project-id
    ```
 
-3. Source the environment variables:
+3. **Important**: Export the API key in your shell before running:
    ```bash
-   source .env  # or use direnv, python-dotenv, etc.
+   export ANTHROPIC_API_KEY='sk-ant-api03-...'
    ```
+
+   **Why This is Required**: The Python process needs the API key to be set in the shell environment before starting. While the `.env` file provides a convenient way to store credentials, explicitly exporting the key ensures it's available throughout the entire workflow execution.
 
 ## Usage
 
@@ -229,7 +231,16 @@ pip install -r requirements.txt
 Run the full three-stage workflow:
 
 ```bash
+# Export the API key first (required for authentication)
+export ANTHROPIC_API_KEY='sk-ant-api03-...'
+
+# Then run the workflow
 python main.py --client rogue-creamery --start-date 2025-01-01 --end-date 2025-01-31
+```
+
+**One-liner (recommended):**
+```bash
+export ANTHROPIC_API_KEY='sk-ant-api03-...' && python main.py --client rogue-creamery --start-date 2025-01-01 --end-date 2025-01-31
 ```
 
 ### Command-Line Arguments
@@ -514,16 +525,81 @@ https://emailpilot-simple-935786836546.us-central1.run.app
 - Security: Non-root user `emailpilot` (UID 1000)
 - Scaling: Automatic via Cloud Run
 
+**Recent Production Enhancements (Jan 2025):**
+
+1. **Job Polling System (commit 684e773)**
+   - Real-time job status updates via `/api/jobs/{job_id}`
+   - Stage-by-stage progress tracking (queued → stage-1 → stage-2 → stage-3 → completed)
+   - Human-readable output formatting in UI with weekly calendar views
+   - Debug console with color-coded logging (info, success, warning, error)
+
+2. **GCS Persistent Storage (commit d21b2f4)**
+   - Automatic output persistence to Google Cloud Storage in production
+   - Ephemeral local storage remains for development
+   - Output retrieval with GCS-first, local-fallback pattern
+   - Bucket auto-creation: `{project-id}-emailpilot-outputs`
+
+3. **Enhanced RAG Client (commit 7863ff0)**
+   - Switched to async `EnhancedRAGClient` for better performance
+   - Vector search with FAISS + OpenAI embeddings (optional)
+   - Automatic file-based fallback when OpenAI key not configured
+   - Semantic document retrieval for improved context quality
+
+4. **MCP Data Validation (commit f3a9be6)**
+   - Critical validation: workflow halts if no real Klaviyo data found
+   - Fail-fast on missing segments, campaigns, or performance data
+   - Prevents generating calendars from generic benchmarks only
+   - Clear error messages for debugging data access issues
+
 ### API Endpoints
 
 **Web UI:**
 ```
-GET / - Interactive calendar generation interface
+GET / - Interactive calendar generation interface with tabbed navigation
+      - 🚀 Workflow: Execute calendar generation with real-time job polling
+      - 📝 Prompts: Edit YAML prompt templates directly in the browser
+      - 📚 RAG Data: View brand intelligence documents
+      - 🔌 MCP Data: Inspect Klaviyo segments and campaign data
+      - 📄 Outputs: View generated calendars with formatted weekly views
+      - 💾 Cache: Monitor and manage MCP data cache
 ```
 
 **Health Check:**
 ```
 GET /api/health - Service health and component status
+```
+
+**Workflow Execution:**
+```
+POST /api/workflow/run
+Body: {
+  "stage": "full",  # Options: validate, stage-1, stage-2, stage-3, full
+  "clientName": "rogue-creamery",
+  "startDate": "2025-01-01",
+  "endDate": "2025-01-31"
+}
+Response: {
+  "success": true,
+  "job_id": "uuid",
+  "message": "Workflow started"
+}
+```
+
+**Job Status & Polling:**
+```
+GET /api/jobs/{job_id} - Get real-time job status with progress updates
+Response: {
+  "job_id": "uuid",
+  "status": "stage-2",  # queued, stage-1, stage-2, stage-3, completed, failed
+  "current_stage": 2,
+  "client_name": "rogue-creamery",
+  "created_at": "2025-01-11T12:00:00",
+  "results": {
+    "planning": {...},
+    "calendar": {...},
+    "briefs": {...}
+  }
+}
 ```
 
 **MCP Data (Raw Klaviyo Data):**
@@ -536,44 +612,84 @@ Body: {
 }
 ```
 
-**Calendar Generation Workflow:**
+**Prompt Management:**
 ```
-POST /api/workflow/run
-Body: {
-  "client_name": "rogue-creamery",
-  "start_date": "2025-01-01",
-  "end_date": "2025-01-31"
+GET /api/prompts/{prompt_name} - Get prompt template
+PUT /api/prompts/{prompt_name} - Update prompt template
+Body: { "content": "system_prompt: ...\nuser_prompt: ..." }
+```
+
+**RAG Data:**
+```
+POST /api/rag/data
+Body: { "clientName": "rogue-creamery" }
+```
+
+**Outputs (GCS + Local):**
+```
+GET /api/outputs/{output_type} - Get workflow outputs
+    - Retrieves from GCS in production (persistent storage)
+    - Falls back to local files in development
+    - Types: planning, calendar, briefs
+Response: {
+  "filename": "rogue-creamery_2025-01-01_calendar.json",
+  "content": {...},
+  "modified": "2025-01-11T12:00:00",
+  "source": "gcs"  # or "local"
 }
 ```
 
-**Additional Endpoints:**
+**Cache Management:**
 ```
-GET /api/jobs/{job_id} - Get job status and results
-GET /api/prompts/{prompt_name} - Get prompt template
-PUT /api/prompts/{prompt_name} - Update prompt template
-POST /api/rag/data - Retrieve RAG (brand intelligence) data
-GET /api/outputs/{output_type} - Get workflow outputs
-GET /api/cache - Get cache statistics
-DELETE /api/cache - Clear cache
+GET /api/cache - Get cache statistics and entries
+DELETE /api/cache - Clear all cached data
 ```
 
 ### Testing Production
 
 **Test via Web UI:**
 1. Visit `https://emailpilot-simple-935786836546.us-central1.run.app`
-2. Fill in client name, start date, end date
-3. Click "Generate Calendar"
-4. View results in the UI
+2. Navigate to the **🚀 Workflow** tab
+3. Fill in:
+   - Client name (e.g., "rogue-creamery")
+   - Start date (YYYY-MM-DD)
+   - End date (YYYY-MM-DD)
+4. Click one of the action buttons:
+   - **✓ Validate Inputs** - Check configuration without running workflow
+   - **1️⃣ Run Stage 1** - Execute planning stage only
+   - **2️⃣ Run Stage 2** - Execute structuring stage only
+   - **3️⃣ Run Stage 3** - Execute brief generation stage only
+   - **🚀 Run Full Workflow** - Execute all three stages
+5. Monitor real-time progress in the job status section
+6. View results in the **📄 Outputs** tab once complete
+
+**Interactive Features:**
+- **📝 Prompts Tab**: Edit YAML prompt templates and reload
+- **📚 RAG Data Tab**: View brand intelligence documents for any client
+- **🔌 MCP Data Tab**: Inspect Klaviyo segments and campaign performance
+- **💾 Cache Tab**: Monitor and clear cached MCP data
+- **Debug Console**: View color-coded logs and export as JSON
 
 **Test via curl:**
 ```bash
 # Health check
 curl https://emailpilot-simple-935786836546.us-central1.run.app/api/health
 
-# Generate calendar
-curl -X POST 'https://emailpilot-simple-935786836546.us-central1.run.app/api/generate' \
+# Start workflow and get job ID
+JOB_ID=$(curl -s -X POST 'https://emailpilot-simple-935786836546.us-central1.run.app/api/workflow/run' \
   -H 'Content-Type: application/json' \
-  -d '{"clientName": "rogue-creamery", "startDate": "2025-01-01", "endDate": "2025-01-31"}'
+  -d '{
+    "stage": "full",
+    "clientName": "rogue-creamery",
+    "startDate": "2025-01-01",
+    "endDate": "2025-01-31"
+  }' | jq -r '.job_id')
+
+# Poll job status
+curl "https://emailpilot-simple-935786836546.us-central1.run.app/api/jobs/$JOB_ID"
+
+# Get specific output type after completion
+curl "https://emailpilot-simple-935786836546.us-central1.run.app/api/outputs/calendar"
 ```
 
 ### Available Clients

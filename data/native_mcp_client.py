@@ -16,6 +16,8 @@ from dataclasses import dataclass
 import httpx
 from google.cloud import secretmanager
 
+from data.mcp_file_cache import get_cache
+
 logger = logging.getLogger(__name__)
 
 
@@ -447,7 +449,10 @@ class NativeMCPClient:
     ) -> Dict[str, Any]:
         """
         Fetch all Klaviyo data for a client.
-        NOW INCLUDES VALIDATION - Will raise ValueError if critical data is missing.
+        NOW INCLUDES VALIDATION & CACHING - Will raise ValueError if critical data is missing.
+
+        In development mode with USE_MCP_CACHE=true, will check local file cache first
+        before fetching from MCP servers. Fresh data is automatically cached after fetch.
 
         Args:
             client_name: Client name (e.g., "rogue-creamery")
@@ -465,6 +470,22 @@ class NativeMCPClient:
         if not server:
             raise ValueError(f"No MCP server found for client: {client_name}")
 
+        # Check cache first in development mode
+        if os.getenv('USE_MCP_CACHE') == 'true' and os.getenv('ENVIRONMENT') == 'development':
+            cache = get_cache()
+            cached_data = cache.load_cache(client_name, (start_date or '', end_date or ''))
+            if cached_data:
+                logger.info(f"Using cached MCP data for {client_name}")
+                # Validate cached data
+                self._validate_mcp_data(cached_data, client_name, start_date, end_date)
+                logger.info(
+                    f"✅ Cached data validation passed: "
+                    f"{len(cached_data.get('segments', []))} segments, "
+                    f"{len(cached_data.get('campaigns', []))} campaigns, "
+                    f"{len(cached_data.get('flows', []))} flows"
+                )
+                return cached_data
+
         logger.info(f"Fetching all MCP data for {client_name}")
 
         # Fetch data in parallel
@@ -473,13 +494,15 @@ class NativeMCPClient:
         flows_task = self._fetch_flows(server)
         metrics_task = self._fetch_metrics(server)
         lists_task = self._fetch_lists(server)
+        catalog_task = self._fetch_catalog_items(server)
 
-        segments, campaigns, flows, metrics, lists_data = await asyncio.gather(
+        segments, campaigns, flows, metrics, lists_data, catalog_items = await asyncio.gather(
             segments_task,
             campaigns_task,
             flows_task,
             metrics_task,
             lists_task,
+            catalog_task,
             return_exceptions=True
         )
 
@@ -513,19 +536,30 @@ class NativeMCPClient:
             logger.warning(f"Lists API failed (non-critical): {str(lists_data)}")
             lists_data = []
 
+        if isinstance(catalog_items, Exception):
+            logger.warning(f"Catalog API failed (non-critical): {str(catalog_items)}")
+            catalog_items = []
+
         result = {
             "segments": segments,
             "campaigns": campaigns,
             "flows": flows,
             "metrics": metrics,
-            "lists": lists_data
+            "lists": lists_data,
+            "catalog_items": catalog_items
         }
 
         logger.info(
             f"MCP data fetch complete for {client_name}: "
             f"{len(result['segments'])} segments, "
             f"{len(result['campaigns'])} campaigns, "
-            f"{len(result['flows'])} flows"
+            f"{len(result['flows'])} flows, "
+            f"{len(result['catalog_items'])} catalog items"
+        )
+
+        # DIAGNOSTIC: Use WARNING level to ensure visibility in output
+        logger.warning(
+            f"📊 MCP CATALOG DIAGNOSTIC: Fetched {len(result['catalog_items'])} catalog items for {client_name}"
         )
 
         # Validate that we have REAL data, not empty structures
@@ -538,6 +572,11 @@ class NativeMCPClient:
             f"{len(campaigns)} campaigns, "
             f"{len(flows)} flows"
         )
+
+        # Save to cache in development mode
+        if os.getenv('USE_MCP_CACHE') == 'true' and os.getenv('ENVIRONMENT') == 'development':
+            cache = get_cache()
+            cache.save_cache(client_name, (start_date or '', end_date or ''), result)
 
         return result
 
@@ -664,6 +703,81 @@ class NativeMCPClient:
         except Exception as e:
             logger.error(f"Failed to fetch lists: {e}")
             raise
+
+    async def _fetch_catalog_items(self, server: MCPServerProcess) -> List[Dict[str, Any]]:
+        """Fetch catalog items (products) from Klaviyo
+
+        Note: Limited to 100 items to prevent token limit errors.
+        For large catalogs, only the first 100 items are returned.
+        """
+        try:
+            # Fetch with pagination to avoid token limit errors
+            # Limit to 100 items - this keeps response under MCP's 25000 token limit
+            all_items = []
+            page_cursor = None
+            max_items = 100
+
+            logger.info(f"Starting catalog fetch using server: {server.name if hasattr(server, 'name') else 'unknown'}")
+
+            # DIAGNOSTIC: Use WARNING level to ensure visibility in output
+            logger.warning(f"🔍 MCP CATALOG DIAGNOSTIC: Starting catalog fetch for server")
+
+            while len(all_items) < max_items:
+                params = {
+                    "model": "claude",
+                    "catalog_item_fields": [
+                        "title", "description", "price", "external_id",
+                        "url", "image_full_url", "custom_metadata", "published"
+                    ]
+                }
+
+                # Add page_cursor if we're fetching subsequent pages
+                if page_cursor:
+                    params["page_cursor"] = page_cursor
+
+                logger.info(f"Calling klaviyo_get_catalog_items with page_cursor: {page_cursor}")
+                result = await server.call_tool("klaviyo_get_catalog_items", params)
+                logger.info(f"Tool call result type: {type(result)}, length: {len(result) if result else 'None'}")
+
+                if result and len(result) > 0:
+                    content = result[0]
+                    logger.info(f"Content type from result: {content.get('type') if isinstance(content, dict) else 'not a dict'}")
+                    if content.get("type") == "text":
+                        data = json.loads(content.get("text", "{}"))
+                        items = data.get("data", [])
+                        logger.info(f"Found {len(items)} items in this page")
+                        all_items.extend(items)
+
+                        # Check if there are more pages
+                        links = data.get("links", {})
+                        next_cursor = links.get("next")
+
+                        if not next_cursor or len(all_items) >= max_items:
+                            logger.info(f"Breaking: next_cursor={next_cursor}, total_items={len(all_items)}")
+                            break
+
+                        page_cursor = next_cursor
+                    else:
+                        logger.warning(f"Unexpected content type, breaking loop")
+                        break
+                else:
+                    logger.warning(f"Empty or None result from tool call, breaking loop")
+                    break
+
+            # Truncate to max_items if we got more
+            result_items = all_items[:max_items]
+
+            if len(result_items) > 0:
+                logger.info(f"Fetched {len(result_items)} catalog items (limited to {max_items})")
+            else:
+                logger.warning(f"Returning empty catalog - no items found")
+
+            return result_items
+
+        except Exception as e:
+            logger.error(f"Failed to fetch catalog items: {e}")
+            # Return empty list instead of raising - catalog is non-critical
+            return []
 
     async def cleanup(self):
         """Stop all MCP server processes"""
