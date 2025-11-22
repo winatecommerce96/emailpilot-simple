@@ -315,7 +315,11 @@ user_prompt: |
   - Apply revenue multipliers for holiday season (1.2-2.0x)
   - Plan around holiday blackout dates and key shopping events
 
+  == ESP PLATFORM CONTEXT ==
+  {esp_platform_context}
+
   == REQUIRED CAMPAIGN SPECIFICATIONS (ALL 13+ FIELDS) ==
+
 
   For EACH of the 10-15 campaigns (12-15 for Nov/Dec), please specify:
 

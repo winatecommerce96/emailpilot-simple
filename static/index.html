@@ -600,7 +600,7 @@
 
                     this.workflowStatus = {
                         stage: stages[stage],
-                        message: 'Starting workflow...'
+                        message: 'Processing...'
                     };
 
                     try {
@@ -609,17 +609,8 @@
                             ...this.workflowConfig
                         });
 
-                        // Check if this is an async job (has job_id)
-                        if (result.data && result.data.job_id) {
-                            this.debugLog(`Workflow started with job ID: ${result.data.job_id}`, 'info', result);
-
-                            // Start polling for job status
-                            await this.pollJobStatus(result.data.job_id, stages[stage]);
-                        } else {
-                            // Immediate result (for validation or single stages)
-                            this.workflowResult = result;
-                            this.debugLog(`Workflow ${stage} completed`, 'success', result);
-                        }
+                        this.workflowResult = result;
+                        this.debugLog(`Workflow ${stage} completed`, 'success', result);
 
                     } catch (error) {
                         this.workflowResult = {
@@ -630,105 +621,6 @@
 
                     } finally {
                         this.workflowRunning = false;
-                    }
-                },
-
-                async pollJobStatus(jobId, stageName) {
-                    const maxAttempts = 600; // 10 minutes max (2s intervals)
-                    let attempts = 0;
-
-                    const stageMessages = {
-                        'queued': 'Queued - waiting to start...',
-                        'stage-1': '🎯 Stage 1: Planning campaign strategy...',
-                        'stage-2': '📅 Stage 2: Structuring calendar...',
-                        'stage-3': '✍️ Stage 3: Generating execution briefs...',
-                        'completed': '✅ Workflow completed!',
-                        'failed': '❌ Workflow failed'
-                    };
-
-                    while (attempts < maxAttempts) {
-                        try {
-                            const result = await this.apiCall(`/jobs/${jobId}`, {}, 'GET');
-                            const jobData = result.data;
-
-                            // Update status display
-                            const statusMessage = stageMessages[jobData.status] || jobData.status;
-                            this.workflowStatus = {
-                                stage: stageName,
-                                message: statusMessage,
-                                currentStage: jobData.current_stage,
-                                totalStages: jobData.total_stages
-                            };
-
-                            this.debugLog(`Job ${jobId} status: ${jobData.status}`, 'info', jobData);
-
-                            // Check if completed
-                            if (jobData.status === 'completed') {
-                                this.workflowResult = {
-                                    success: true,
-                                    data: jobData.results || jobData,
-                                    job_id: jobId
-                                };
-                                this.debugLog(`Job ${jobId} completed successfully`, 'success', jobData);
-
-                                // Reload outputs to show latest results
-                                await this.loadLatestOutputs();
-                                return;
-                            }
-
-                            // Check if failed
-                            if (jobData.status === 'failed') {
-                                this.workflowResult = {
-                                    success: false,
-                                    error: jobData.error || 'Workflow failed',
-                                    job_id: jobId
-                                };
-                                this.debugLog(`Job ${jobId} failed`, 'error', jobData);
-                                return;
-                            }
-
-                            // Wait before next poll
-                            await new Promise(resolve => setTimeout(resolve, 2000));
-                            attempts++;
-
-                        } catch (error) {
-                            this.debugLog(`Error polling job ${jobId}`, 'error', error);
-
-                            // If job not found or error, stop polling
-                            if (error.message.includes('404') || attempts > 5) {
-                                this.workflowResult = {
-                                    success: false,
-                                    error: `Job polling failed: ${error.message}`
-                                };
-                                return;
-                            }
-
-                            await new Promise(resolve => setTimeout(resolve, 2000));
-                            attempts++;
-                        }
-                    }
-
-                    // Timeout reached
-                    this.workflowResult = {
-                        success: false,
-                        error: 'Job polling timeout - workflow may still be running'
-                    };
-                    this.debugLog(`Job ${jobId} polling timeout`, 'error');
-                },
-
-                async loadLatestOutputs() {
-                    // Try to load all output types
-                    const outputTypes = ['latest-planning', 'latest-calendar', 'latest-briefs'];
-
-                    for (const outputType of outputTypes) {
-                        try {
-                            const result = await this.apiCall(`/outputs/${outputType}`, {}, 'GET');
-                            if (result.data && result.data.content) {
-                                this.debugLog(`Loaded ${outputType}`, 'success');
-                            }
-                        } catch (error) {
-                            // Silently ignore - outputs may not exist yet
-                        }
                     }
                 },
 
@@ -788,131 +680,11 @@
 
                     try {
                         const result = await this.apiCall(`/outputs/${this.selectedOutput}`, {}, 'GET');
-
-                        // Format output based on type
-                        if (result.data && result.data.content) {
-                            this.outputData = this.formatOutput(this.selectedOutput, result.data.content);
-                        } else {
-                            this.outputData = JSON.stringify(result.data, null, 2);
-                        }
-
+                        this.outputData = JSON.stringify(result.data, null, 2);
                         this.debugLog(`Loaded output: ${this.selectedOutput}`, 'success');
                     } catch (error) {
                         this.debugLog(`Failed to load output`, 'error', error);
-                        this.outputData = `Error loading output: ${error.message}`;
                     }
-                },
-
-                formatOutput(outputType, content) {
-                    if (!content) return 'No content available';
-
-                    try {
-                        // Handle planning output (markdown text)
-                        if (outputType === 'latest-planning') {
-                            if (typeof content === 'string') {
-                                return content; // Already formatted markdown
-                            }
-                            return JSON.stringify(content, null, 2);
-                        }
-
-                        // Handle calendar output (JSON)
-                        if (outputType === 'latest-calendar') {
-                            if (typeof content === 'string') {
-                                try {
-                                    const parsed = JSON.parse(content);
-                                    return this.formatCalendarData(parsed);
-                                } catch {
-                                    return content;
-                                }
-                            }
-                            return this.formatCalendarData(content);
-                        }
-
-                        // Handle briefs output (markdown text)
-                        if (outputType === 'latest-briefs') {
-                            if (typeof content === 'string') {
-                                return content; // Already formatted markdown
-                            }
-                            return JSON.stringify(content, null, 2);
-                        }
-
-                        return JSON.stringify(content, null, 2);
-                    } catch (error) {
-                        return `Error formatting output: ${error.message}\n\n${content}`;
-                    }
-                },
-
-                formatCalendarData(calendar) {
-                    if (!calendar || !calendar.campaigns) {
-                        return JSON.stringify(calendar, null, 2);
-                    }
-
-                    let output = `📅 CAMPAIGN CALENDAR\n`;
-                    output += `${'='.repeat(80)}\n\n`;
-
-                    output += `📊 Summary:\n`;
-                    output += `  • Total Campaigns: ${calendar.campaigns.length}\n`;
-                    output += `  • Date Range: ${calendar.start_date} to ${calendar.end_date}\n`;
-
-                    if (calendar.metadata) {
-                        output += `  • Generated: ${calendar.metadata.generated_at || 'N/A'}\n`;
-                    }
-                    output += `\n`;
-
-                    // Group campaigns by week
-                    const campaignsByWeek = {};
-                    calendar.campaigns.forEach(campaign => {
-                        const date = new Date(campaign.send_date);
-                        const weekStart = new Date(date);
-                        weekStart.setDate(date.getDate() - date.getDay());
-                        const weekKey = weekStart.toISOString().split('T')[0];
-
-                        if (!campaignsByWeek[weekKey]) {
-                            campaignsByWeek[weekKey] = [];
-                        }
-                        campaignsByWeek[weekKey].push(campaign);
-                    });
-
-                    // Display campaigns by week
-                    Object.keys(campaignsByWeek).sort().forEach(weekStart => {
-                        const weekEnd = new Date(weekStart);
-                        weekEnd.setDate(weekEnd.getDate() + 6);
-
-                        output += `\n📆 Week of ${weekStart}:\n`;
-                        output += `${'-'.repeat(80)}\n`;
-
-                        campaignsByWeek[weekStart].sort((a, b) =>
-                            new Date(a.send_date) - new Date(b.send_date)
-                        ).forEach((campaign, idx) => {
-                            output += `\n  ${idx + 1}. ${campaign.campaign_name}\n`;
-                            output += `     📅 Send Date: ${campaign.send_date}\n`;
-
-                            if (campaign.send_time) {
-                                output += `     ⏰ Send Time: ${campaign.send_time}\n`;
-                            }
-
-                            if (campaign.campaign_type) {
-                                output += `     🏷️  Type: ${campaign.campaign_type}\n`;
-                            }
-
-                            if (campaign.subject_line) {
-                                output += `     ✉️  Subject: ${campaign.subject_line}\n`;
-                            }
-
-                            if (campaign.audience && campaign.audience.length > 0) {
-                                output += `     👥 Audience: ${campaign.audience.join(', ')}\n`;
-                            }
-
-                            if (campaign.goals && campaign.goals.length > 0) {
-                                output += `     🎯 Goals:\n`;
-                                campaign.goals.forEach(goal => {
-                                    output += `        • ${goal}\n`;
-                                });
-                            }
-                        });
-                    });
-
-                    return output;
                 },
 
                 // Cache methods

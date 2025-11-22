@@ -24,8 +24,8 @@ load_dotenv()
 
 from tools import CalendarTool, CalendarValidator
 from agents.calendar_agent import CalendarAgent
-from data.native_mcp_client import NativeMCPClient as MCPClient
-from data.enhanced_rag_client import EnhancedRAGClient
+from data.mcp_client import MCPClient
+from data.rag_client import RAGClient
 from data.firestore_client import FirestoreClient
 from data.mcp_cache import MCPCache
 from data.secret_manager_client import SecretManagerClient
@@ -33,7 +33,7 @@ from data.secret_manager_client import SecretManagerClient
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout)
@@ -118,24 +118,18 @@ Examples:
 def load_config():
     """Load configuration from environment variables."""
     config = {
-        'anthropic_api_key': os.getenv('ANTHROPIC_API_KEY') or os.getenv('ANTHROPIC_DOC_TO_ASANA_KEY'),
+        'anthropic_api_key': os.getenv('ANTHROPIC_API_KEY'),
         'google_cloud_project': os.getenv('GOOGLE_CLOUD_PROJECT'),
-        'openai_api_key': os.getenv('OPENAI_API_KEY'),
     }
 
-    # Validate required environment variables (OpenAI key is optional)
-    required_keys = ['anthropic_api_key', 'google_cloud_project']
-    missing = [key for key in required_keys if not config.get(key)]
+    # Validate required environment variables
+    missing = [key for key, value in config.items() if not value]
     if missing:
         logger.error(f"Missing required environment variables: {', '.join(missing)}")
         logger.error("Please set the following environment variables:")
         for key in missing:
             logger.error(f"  - {key.upper()}")
         sys.exit(1)
-
-    # Warn if OpenAI key missing (non-fatal)
-    if not config.get('openai_api_key'):
-        logger.warning("OPENAI_API_KEY not set - RAG will use file-based fallback instead of vector search")
 
     return config
 
@@ -164,10 +158,8 @@ def initialize_components(config: dict, args: argparse.Namespace):
         secret_manager_client=secret_manager_client
     )
 
-    rag_client = EnhancedRAGClient(
-        rag_base_path='/Users/Damon/klaviyo/klaviyo-audit-automation/emailpilot-orchestrator/rag',
-        use_vector_search=True,
-        openai_api_key=config.get('openai_api_key')
+    rag_client = RAGClient(
+        rag_base_path='/Users/Damon/klaviyo/klaviyo-audit-automation/emailpilot-orchestrator/rag'
     )
 
     firestore_client = FirestoreClient(
@@ -386,10 +378,12 @@ async def main():
     logger.info("Initializing workflow components...")
     logger.info("Initializing data layer clients...")
 
-    rag_client = EnhancedRAGClient(
-        rag_base_path='/Users/Damon/klaviyo/klaviyo-audit-automation/emailpilot-orchestrator/rag',
-        use_vector_search=True,
-        openai_api_key=config.get('openai_api_key')
+    secret_manager_client = SecretManagerClient(
+        project_id=config['google_cloud_project']
+    )
+
+    rag_client = RAGClient(
+        rag_base_path='/Users/Damon/klaviyo/klaviyo-audit-automation/emailpilot-orchestrator/rag'
     )
 
     firestore_client = FirestoreClient(
@@ -399,10 +393,7 @@ async def main():
     cache = MCPCache()
 
     # Use async context manager for MCPClient
-    async with MCPClient(
-        project_id=config['google_cloud_project'],
-        config_path='.mcp.json'
-    ) as mcp_client:
+    async with MCPClient(secret_manager_client=secret_manager_client) as mcp_client:
         logger.info("Data layer clients initialized")
 
         # Initialize Calendar Agent

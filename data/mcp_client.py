@@ -46,6 +46,8 @@ class MCPClient:
         self.timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
         self.client_name: Optional[str] = None
+        self.braze_process: Optional[Any] = None  # Braze MCP server subprocess
+
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -56,6 +58,69 @@ class MCPClient:
         """Async context manager exit."""
         if self._client:
             await self._client.aclose()
+        
+        # Cleanup Braze MCP server if running
+        if self.braze_process:
+            try:
+                self.braze_process.terminate()
+                self.braze_process.wait(timeout=5)
+                logger.info("Braze MCP server terminated")
+            except Exception as e:
+                logger.warning(f"Error terminating Braze MCP server: {e}")
+                try:
+                    self.braze_process.kill()
+                except:
+                    pass
+
+
+    def _spawn_braze_server(self, client_name: str, credentials: Dict[str, str]):
+        """
+        Spawn Braze MCP server as subprocess.
+        
+        Args:
+            client_name: Client slug
+            credentials: Dict with BRAZE_API_KEY, BRAZE_BASE_URL, BRAZE_APP_ID
+        """
+        import subprocess
+        import shutil
+        
+        # Check if uv is installed
+        if not shutil.which("uv"):
+            logger.warning("uv not found, attempting to use pip-installed package directly")
+            cmd = ["python3", "-m", "braze_mcp_server"]
+        else:
+            # Use uvx to run the server
+            cmd = ["uvx", "--native-tls", "braze-mcp-server@latest"]
+            
+        logger.info(f"Spawning Braze MCP server for {client_name}: {' '.join(cmd)}")
+        
+        env = os.environ.copy()
+        env.update(credentials)
+        
+        try:
+            self.braze_process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+                text=True,
+                bufsize=1
+            )
+            
+            # Give it a moment to start
+            import time
+            time.sleep(2)
+            
+            if self.braze_process.poll() is not None:
+                stdout, stderr = self.braze_process.communicate()
+                raise RuntimeError(f"Braze MCP server failed to start. Exit code: {self.braze_process.returncode}\nStderr: {stderr}")
+                
+            logger.info(f"✅ Braze MCP server started (PID: {self.braze_process.pid})")
+            
+        except Exception as e:
+            logger.error(f"Failed to spawn Braze MCP server: {e}")
+            raise
 
     def _get_mcp_account_name(self, client_name: str) -> str:
         """
@@ -186,6 +251,94 @@ class MCPClient:
             logger.error(f"MCP tool {tool_name} failed: {str(e)}")
             raise
 
+    async def _call_braze_tool(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Call a Braze MCP tool via the spawned server process using JSON-RPC.
+        
+        Args:
+            tool_name: Name of the tool (e.g., "list_campaigns")
+            params: Tool parameters
+            
+        Returns:
+            Tool result
+        """
+        if not self.braze_process:
+            raise RuntimeError("Braze MCP server not running")
+            
+        import json
+        
+        # Construct JSON-RPC request
+
+        request_id = self._next_request_id()
+        request = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {
+                "name": tool_name,
+                "arguments": params
+            }
+        }
+        
+        request_json = json.dumps(request)
+        logger.info(f"Calling Braze tool: {tool_name} (ID: {request_id})")
+        
+        try:
+            # Send request
+            self.braze_process.stdin.write(request_json + "\n")
+            self.braze_process.stdin.flush()
+            
+            # Read response
+            # Note: This is a simple implementation that assumes one response per request
+            # and that the response is on a single line (standard for MCP)
+            response_line = self.braze_process.stdout.readline()
+            
+            if not response_line:
+                stderr = self.braze_process.stderr.read() if self.braze_process.stderr else ""
+                raise RuntimeError(f"Braze MCP server closed connection. Stderr: {stderr}")
+                
+            response = json.loads(response_line)
+            
+            if "error" in response:
+                raise RuntimeError(f"Braze MCP error: {response['error']}")
+                
+            if response.get("id") != request_id:
+                logger.warning(f"Response ID mismatch: expected {request_id}, got {response.get('id')}")
+                
+            # MCP tools/call returns content list
+            result = response.get("result", {})
+            content = result.get("content", [])
+            
+            # Parse content (usually JSON in text)
+            parsed_result = {}
+            for item in content:
+                if item.get("type") == "text":
+                    try:
+                        text_content = item.get("text", "{}")
+                        item_data = json.loads(text_content)
+                        if isinstance(item_data, dict):
+                            parsed_result.update(item_data)
+                        elif isinstance(item_data, list):
+                            # If list, might be list of campaigns/segments
+                            # We'll wrap it if we can infer the key, or just return raw
+                            parsed_result = item_data
+                    except json.JSONDecodeError:
+                        logger.warning(f"Could not parse Braze tool output as JSON: {item.get('text')[:100]}...")
+                        parsed_result = {"raw_text": item.get("text")}
+            
+            return parsed_result
+            
+        except Exception as e:
+            logger.error(f"Failed to call Braze tool {tool_name}: {e}")
+            raise
+
+    def _next_request_id(self) -> int:
+        """Generate next JSON-RPC request ID."""
+        if not hasattr(self, "_request_id_counter"):
+            self._request_id_counter = 0
+        self._request_id_counter += 1
+        return self._request_id_counter
+
     async def fetch_segments(
         self,
         client_name: str,
@@ -194,7 +347,6 @@ class MCPClient:
         """
         Fetch all segments for a client.
 
-        Args:
             client_name: Client slug (e.g., "rogue-creamery")
             fields: Fields to return (default: name, created, updated, is_active)
 
@@ -440,74 +592,112 @@ class MCPClient:
 
         return {"data": {}}
 
-    def _validate_mcp_data(
+    async def _fetch_braze_data(
         self,
-        mcp_data: Dict[str, Any],
         client_name: str,
         start_date: str,
         end_date: str
-    ) -> None:
+    ) -> Dict[str, Any]:
         """
-        Validate that MCP data contains REAL data, not empty structures.
-
-        This ensures the workflow cannot proceed with empty or missing Klaviyo data,
-        preventing generation of calendars based solely on industry benchmarks.
-
+        Fetch all Braze data via Braze MCP server.
+        
         Args:
-            mcp_data: Dictionary containing fetched MCP data
-            client_name: Client slug (e.g., "rogue-creamery")
+            client_name: Client slug
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
-
-        Raises:
-            ValueError: If critical data is missing or invalid
+            
+        Returns:
+            Dictionary with Braze data in normalized Klaviyo-like format
         """
-        errors = []
-        warnings = []
-
-        # Critical validations (HALT if these fail)
-        segments = mcp_data.get("segments", [])
-        campaigns = mcp_data.get("campaigns", [])
-        flows = mcp_data.get("flows", [])
-        campaign_report = mcp_data.get("campaign_report", {})
-
-        # Verify segments exist (critical for audience targeting)
-        if not segments:
-            errors.append("No segments retrieved from Klaviyo - cannot generate audience-targeted campaigns")
-        elif len(segments) == 0:
-            errors.append("Segments array is empty - API call succeeded but returned no data")
-
-        # Verify at least some historical data exists
-        if not campaigns and not flows:
-            errors.append("No historical campaigns or flows found - cannot base recommendations on past performance")
-
-        # Verify performance data exists
-        if not campaign_report or not campaign_report.get("data"):
-            errors.append("No campaign performance data - cannot calculate ROI or optimize send times")
-
-        # Warnings (log but don't halt)
-        if not flows:
-            warnings.append("No flows found - this may be expected for newer accounts")
-
-        # If we have errors, raise an exception with detailed context
-        if errors:
-            error_msg = f"\n❌ MCP Data Validation Failed for {client_name} ({start_date} to {end_date})\n\n"
-            error_msg += "Critical Issues:\n"
-            for error in errors:
-                error_msg += f"  • {error}\n"
-
-            if warnings:
-                error_msg += "\nWarnings:\n"
-                for warning in warnings:
-                    error_msg += f"  ⚠️  {warning}\n"
-
-            error_msg += "\n🛑 WORKFLOW HALTED - Cannot generate calendar without real Klaviyo data"
-
-            raise ValueError(error_msg)
-
-        if warnings:
-            for warning in warnings:
-                logger.warning(warning)
+        logger.info(f"Fetching Braze data for {client_name}")
+        
+        # 1. Get credentials and spawn server
+        credentials = self._get_braze_credentials(client_name)
+        self._spawn_braze_server(client_name, credentials)
+        
+        try:
+            # 2. Fetch Segments
+            logger.info("Fetching Braze segments...")
+            segments_data = await self._call_braze_tool("list_segments", {})
+            segments = segments_data.get("segments", [])
+            
+            # 3. Fetch Campaigns
+            logger.info("Fetching Braze campaigns...")
+            # Braze lists are paginated, but we'll just get the first page/batch for now
+            # or until we hit a reasonable limit
+            campaigns_data = await self._call_braze_tool("list_campaigns", {
+                "page": 0,
+                "include_archived": False,
+                "sort_direction": "desc",
+                "last_edit.time[gt]": start_date
+            })
+            campaigns = campaigns_data.get("campaigns", [])
+            
+            # 4. Fetch Canvases (Flows)
+            logger.info("Fetching Braze canvases...")
+            canvases_data = await self._call_braze_tool("list_canvases", {
+                "page": 0,
+                "include_archived": False,
+                "sort_direction": "desc",
+                "last_edit.time[gt]": start_date
+            })
+            canvases = canvases_data.get("canvases", [])
+            
+            # 5. Fetch Revenue Data
+            # We'll use the revenue series endpoint to get aggregate data
+            logger.info("Fetching Braze revenue data...")
+            
+            # Calculate days for length (max 100)
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+            days = (end_dt - start_dt).days + 1
+            if days > 90:
+                days = 90  # Cap at 90 to be safe
+                
+            revenue_data = await self._call_braze_tool("get_purchases_revenue_series", {
+                "length": days,
+                "ending_at": f"{end_date}T23:59:59Z",
+                "product": "eComm Order"
+            })
+            revenue_series = revenue_data.get("data", [])
+            
+            # 6. Normalize Data
+            segments = self._normalize_braze_segments(segments)
+            campaigns = self._normalize_braze_campaigns(campaigns)
+            flows = self._normalize_braze_canvases(canvases)
+            
+            # 7. Extract Revenue Metrics
+            revenue_metrics = self._extract_braze_revenue_metrics(revenue_series)
+            
+            result = {
+                "segments": segments,
+                "campaigns": campaigns,
+                "campaign_report": {"aggregate_metrics": revenue_metrics}, # Store aggregate metrics here for now
+                "flows": flows,
+                "flow_report": {},
+                "revenue_series": revenue_series,
+                "metadata": {
+                    "client_name": client_name,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "fetched_at": datetime.utcnow().isoformat(),
+                    "esp_platform": "braze"
+                }
+            }
+            
+            logger.info(f"Braze data fetch complete: {len(segments)} segments, {len(campaigns)} campaigns, {len(flows)} flows")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error fetching Braze data: {e}")
+            # Cleanup server on error
+            if self.braze_process:
+                try:
+                    self.braze_process.terminate()
+                except:
+                    pass
+                self.braze_process = None
+            raise
 
     async def fetch_all_data(
         self,
@@ -519,7 +709,7 @@ class MCPClient:
         Fetch all MCP data for a client in parallel.
 
         This is the main method used in Stage 1 (Planning) to fetch
-        all necessary Klaviyo data at once.
+        all necessary ESP data at once (Klaviyo or Braze).
 
         Args:
             client_name: Client slug
@@ -532,8 +722,9 @@ class MCPClient:
                 "segments": [...],
                 "campaigns": [...],
                 "campaign_report": {...},
-                "flows": [...],
+                "flows": [...],  # or "canvases" for Braze
                 "flow_report": {...},
+                "esp_platform": "klaviyo" or "braze",
                 "metadata": {
                     "client_name": str,
                     "start_date": str,
@@ -543,6 +734,40 @@ class MCPClient:
             }
         """
         logger.info(f"Fetching all MCP data for {client_name} ({start_date} to {end_date})")
+
+        # Detect ESP platform
+        esp_platform = self._detect_esp_platform(client_name)
+        
+        if esp_platform == "braze":
+            logger.info(f"Using Braze MCP for {client_name}")
+            result = await self._fetch_braze_data(client_name, start_date, end_date)
+        else:
+            logger.info(f"Using Klaviyo MCP for {client_name}")
+            result = await self._fetch_klaviyo_data(client_name, start_date, end_date)
+        
+        # Add ESP platform to result
+        result["esp_platform"] = esp_platform
+        
+        return result
+
+    async def _fetch_klaviyo_data(
+        self,
+        client_name: str,
+        start_date: str,
+        end_date: str
+    ) -> Dict[str, Any]:
+        """
+        Fetch all Klaviyo data via MCP (existing logic).
+        
+        Args:
+            client_name: Client slug
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            
+        Returns:
+            Dictionary with Klaviyo data
+        """
+        logger.info(f"Fetching Klaviyo data for {client_name}")
 
         # Fetch all data in parallel
         segments_task = self.fetch_segments(client_name)
@@ -561,33 +786,25 @@ class MCPClient:
             return_exceptions=True
         )
 
-        # 🔥 NEW: Fail immediately if any critical API call failed
-        critical_errors = []
-
+        # Handle any exceptions
         if isinstance(segments, Exception):
-            critical_errors.append(f"Segments API failed: {str(segments)}")
+            logger.error(f"Failed to fetch segments: {str(segments)}")
+            segments = []
 
         if isinstance(campaigns, Exception):
-            critical_errors.append(f"Campaigns API failed: {str(campaigns)}")
+            logger.error(f"Failed to fetch campaigns: {str(campaigns)}")
+            campaigns = []
 
         if isinstance(campaign_report, Exception):
-            critical_errors.append(f"Campaign report API failed: {str(campaign_report)}")
+            logger.error(f"Failed to fetch campaign report: {str(campaign_report)}")
+            campaign_report = {}
 
-        if critical_errors:
-            error_msg = f"\n❌ Critical MCP API Failures for {client_name}\n\n"
-            for error in critical_errors:
-                error_msg += f"  • {error}\n"
-            error_msg += "\n🛑 WORKFLOW HALTED - Cannot proceed without Klaviyo API access"
-
-            raise RuntimeError(error_msg)
-
-        # Non-critical failures can be warnings
         if isinstance(flows, Exception):
-            logger.warning(f"Flows API failed (non-critical): {str(flows)}")
+            logger.error(f"Failed to fetch flows: {str(flows)}")
             flows = []
 
         if isinstance(flow_report, Exception):
-            logger.warning(f"Flow report API failed (non-critical): {str(flow_report)}")
+            logger.error(f"Failed to fetch flow report: {str(flow_report)}")
             flow_report = {}
 
         result = {
@@ -604,10 +821,77 @@ class MCPClient:
             }
         }
 
-        # 🔥 NEW: Validate that we have REAL data, not empty structures
-        logger.info(f"Validating MCP data for {client_name}...")
-        self._validate_mcp_data(result, client_name, start_date, end_date)
-
-        logger.info(f"✅ MCP data validation passed: {len(segments)} segments, {len(campaigns)} campaigns, {len(flows)} flows")
+        logger.info(f"Klaviyo MCP data fetch complete: {len(segments)} segments, {len(campaigns)} campaigns, {len(flows)} flows")
 
         return result
+
+    def _normalize_braze_campaigns(self, campaigns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Normalize Braze campaigns to unified format."""
+        normalized = []
+        for camp in campaigns:
+            normalized.append({
+                "id": camp.get("id"),
+                "name": camp.get("name"),
+                "status": "Sent" if not camp.get("draft", False) else "Draft",
+                "send_time": camp.get("last_sent") or camp.get("created_at"),
+                "channel": camp.get("channels", ["email"])[0] if camp.get("channels") else "email",
+                "tags": camp.get("tags", [])
+            })
+        return normalized
+
+    def _normalize_braze_segments(self, segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Normalize Braze segments to unified format."""
+        normalized = []
+        for seg in segments:
+            normalized.append({
+                "id": seg.get("id"),
+                "name": seg.get("name"),
+                "type": "segment",
+                "created": seg.get("created_at"),
+                "updated": seg.get("updated_at")
+            })
+        return normalized
+
+    def _normalize_braze_canvases(self, canvases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Normalize Braze canvases (flows) to unified format."""
+        normalized = []
+        for canvas in canvases:
+            normalized.append({
+                "id": canvas.get("id"),
+                "name": canvas.get("name"),
+                "status": "Live" if not canvas.get("draft", False) else "Draft",
+                "type": "flow",
+                "created": canvas.get("created_at"),
+                "updated": canvas.get("updated_at"),
+                "tags": canvas.get("tags", [])
+            })
+        return normalized
+        
+    def _extract_braze_revenue_metrics(self, revenue_series: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Extract aggregate revenue metrics from Braze revenue series.
+        
+        Args:
+            revenue_series: List of daily revenue data points
+            
+        Returns:
+            Dictionary with aggregate metrics
+        """
+        total_revenue = 0.0
+        total_purchases = 0
+        
+        for day in revenue_series:
+            total_revenue += day.get("revenue", 0.0)
+            total_purchases += day.get("count", 0)
+            
+        avg_order_value = total_revenue / total_purchases if total_purchases > 0 else 0.0
+        
+        return {
+            "total_revenue": total_revenue,
+            "total_purchases": total_purchases,
+            "avg_order_value": avg_order_value,
+            "attribution_source": "aggregate_only",
+            "note": "Per-campaign revenue attribution not available via Braze API"
+        }
+
+

@@ -28,8 +28,8 @@ sys.path.insert(0, str(orchestrator_path))
 try:
     from services.langchain_rag_orchestrator import get_langchain_rag_orchestrator
     VECTOR_RAG_AVAILABLE = True
-except ImportError as e:
-    logging.warning(f"Could not import LangChain RAG orchestrator: {e}")
+except ImportError:
+    # LangChain RAG is optional - using HTTP RAG client instead
     VECTOR_RAG_AVAILABLE = False
 
 logger = logging.getLogger(__name__)

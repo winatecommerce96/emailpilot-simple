@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EmailPilot - Prompt Editor</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/prompt-editor.css">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Highlight.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <i class="fa-solid fa-paper-plane"></i>
+                <span>EmailPilot</span>
+            </div>
+            
+            <nav class="main-nav">
+                <a href="/" class="nav-item">
+                    <i class="fa-solid fa-calendar-days"></i>
+                    <span>Calendar Generator</span>
+                </a>
+                <a href="/static/prompt-editor.html" class="nav-item active">
+                    <i class="fa-solid fa-code"></i>
+                    <span>Prompt Editor</span>
+                </a>
+            </nav>
+            
+            <div class="sidebar-section">
+                <h3>Prompts</h3>
+                <div id="prompt-list" class="prompt-list">
+                    <!-- Prompts will be loaded here -->
+                    <div class="loading-spinner-small"></div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="top-bar">
+                <div class="breadcrumbs">
+                    <span class="text-muted">Tools</span>
+                    <i class="fa-solid fa-chevron-right separator"></i>
+                    <span class="current-page">Prompt Editor</span>
+                </div>
+                <div class="actions">
+                    <button id="refresh-btn" class="btn btn-secondary" title="Refresh Prompts">
+                        <i class="fa-solid fa-sync-alt"></i>
+                    </button>
+                </div>
+            </header>
+
+            <div class="editor-container">
+                <div class="editor-header">
+                    <div class="file-info">
+                        <h2 id="current-filename">Select a prompt</h2>
+                        <span id="current-version" class="badge badge-info hidden">v0.0.0</span>
+                        <span id="unsaved-changes" class="badge badge-warning hidden">Unsaved Changes</span>
+                    </div>
+                    <div class="editor-actions">
+                        <button id="revert-btn" class="btn btn-secondary" disabled>
+                            <i class="fa-solid fa-undo"></i> Revert
+                        </button>
+                        <button id="save-btn" class="btn btn-primary" disabled>
+                            <i class="fa-solid fa-save"></i> Save Changes
+                        </button>
+                    </div>
+                </div>
+
+                <div class="editor-layout">
+                    <div class="code-editor-wrapper">
+                        <textarea id="code-editor" spellcheck="false" disabled></textarea>
+                    </div>
+                    
+                    <div class="variables-panel">
+                        <h3>Variables</h3>
+                        <div id="variables-list" class="variables-list">
+                            <p class="text-muted">Select a prompt to view variables.</p>
+                        </div>
+                        
+                        <div class="variables-actions">
+                            <button id="test-prompt-btn" class="btn btn-outline" disabled>
+                                <i class="fa-solid fa-play"></i> Test Prompt
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast hidden">
+        <div class="toast-content">
+            <i class="fa-solid fa-check-circle"></i>
+            <span id="toast-message">Operation successful</span>
+        </div>
+    </div>
+
+    <script src="js/prompt-editor.js"></script>
+</body>
+</html>

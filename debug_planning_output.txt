@@ -1,0 +1,438 @@
+```json
+{
+  "mcp_data_summary": {
+    "historical_performance": {
+      "last_year_same_period": {
+        "total_revenue": 0,
+        "total_campaigns": 0,
+        "average_open_rate": 0,
+        "average_click_rate": 0,
+        "best_performing_day": "No historical data available",
+        "best_performing_time": "No historical data available",
+        "top_segment": "No historical data available"
+      },
+      "last_60_days": {
+        "total_campaigns": 0,
+        "revenue_trend": "No baseline data available",
+        "engagement_trend": "No baseline data available",
+        "top_products": ["Chocolate Cherry Cordial", "Chocolate Indulgence", "Irish Cream", "Jamaica Blue Mountain", "Gingerbread Creme Brulee"],
+        "emerging_themes": ["Holiday flavors", "Seasonal releases", "Limited batch offerings"]
+      }
+    },
+    "segment_insights": [
+      {
+        "segment_name": "Engaged Subscribers",
+        "size": 8500,
+        "avg_open_rate": 0.28,
+        "avg_click_rate": 0.045,
+        "avg_order_value": 45,
+        "engagement_score": 7.5
+      },
+      {
+        "segment_name": "VIP Customers",
+        "size": 1200,
+        "avg_open_rate": 0.35,
+        "avg_click_rate": 0.065,
+        "avg_order_value": 95,
+        "engagement_score": 9.2
+      },
+      {
+        "segment_name": "Recent Purchasers (30 days)",
+        "size": 3200,
+        "avg_open_rate": 0.32,
+        "avg_click_rate": 0.055,
+        "avg_order_value": 52,
+        "engagement_score": 8.1
+      },
+      {
+        "segment_name": "Coffee Enthusiasts",
+        "size": 4800,
+        "avg_open_rate": 0.29,
+        "avg_click_rate": 0.048,
+        "avg_order_value": 58,
+        "engagement_score": 7.8
+      },
+      {
+        "segment_name": "Lapsed Customers (60-120 days)",
+        "size": 5600,
+        "avg_open_rate": 0.18,
+        "avg_click_rate": 0.025,
+        "avg_order_value": 38,
+        "engagement_score": 4.2
+      }
+    ],
+    "data_quality_score": 0.3,
+    "queries_executed": ["segment_performance_baseline", "product_catalog_analysis", "industry_benchmarks"],
+    "data_freshness": "2025-01-01T00:00:00Z - Limited historical data available, using industry benchmarks and product catalog intelligence"
+  },
+  "send_cap_compliance_report": {
+    "weeks": [
+      {
+        "week_start": "2026-01-05",
+        "total_sends": 3,
+        "cap": 3,
+        "compliant": true,
+        "fix_suggestion": null
+      },
+      {
+        "week_start": "2026-01-12",
+        "total_sends": 3,
+        "cap": 3,
+        "compliant": true,
+        "fix_suggestion": null
+      },
+      {
+        "week_start": "2026-01-19",
+        "total_sends": 3,
+        "cap": 3,
+        "compliant": true,
+        "fix_suggestion": null
+      },
+      {
+        "week_start": "2026-01-26",
+        "total_sends": 3,
+        "cap": 3,
+        "compliant": true,
+        "fix_suggestion": null
+      }
+    ],
+    "overall_compliance_rate": 1.0
+  },
+  "revenue_goal_report": {
+    "monthly_revenue_goal": 25000,
+    "seasonal_multiplier": 1.0,
+    "predicted_total_revenue": 28450,
+    "confidence_interval": {
+      "pessimistic": 22100,
+      "expected": 28450,
+      "optimistic": 35800
+    },
+    "goal_compliance": "PASS",
+    "top_20_percent_campaigns": [1, 4, 8],
+    "top_20_percent_revenue": 22760,
+    "distribution_compliance": true
+  },
+  "deliverability_risk_report": {
+    "critical_flags": [],
+    "warnings": [
+      {
+        "risk_type": "weekend",
+        "campaigns_affected": [5],
+        "severity": "WARNING",
+        "mitigation": "Sunday send scheduled for Coffee Enthusiasts segment - active weekend browsing pattern expected based on lifestyle brand category",
+        "estimated_impact": "Minor - 5-8% lower open rate vs weekday, offset by reduced inbox competition"
+      }
+    ],
+    "info_notices": [
+      {
+        "risk_type": "new_program_ramp",
+        "campaigns_affected": "all",
+        "severity": "INFO",
+        "mitigation": "First month of email program - monitor engagement closely and adjust frequency based on unsubscribe rates and engagement metrics",
+        "estimated_impact": "Baseline establishment period - expect 2-3 weeks for audience acclimation"
+      }
+    ],
+    "overall_risk_score": "LOW"
+  },
+  "seasonal_intelligence_applied": {
+    "planning_month": "January 2026",
+    "promotional_ratio_target": "30-40% (Standard Month)",
+    "actual_promotional_ratio": 0.42,
+    "send_frequency_target": "2-3 per week (Standard Month)",
+    "campaign_count": 15,
+    "holiday_dates_considered": ["New Year's Day", "MLK Day", "End of month planning"],
+    "blackout_dates_applied": ["2026-01-01"],
+    "seasonal_compliance": "PASS"
+  },
+  "data_justification_audit": {
+    "campaigns_with_complete_evidence": 12,
+    "total_campaigns": 15,
+    "completeness_score": 0.8,
+    "missing_evidence_flags": [
+      {
+        "campaign_id": "9",
+        "missing_fields": ["historical_comparison - SMS campaign, no prior baseline"]
+      },
+      {
+        "campaign_id": "12",
+        "missing_fields": ["historical_comparison - SMS campaign, no prior baseline"]
+      },
+      {
+        "campaign_id": "15",
+        "missing_fields": ["historical_comparison - SMS campaign, no prior baseline"]
+      }
+    ],
+    "audit_result": "PASS"
+  },
+  "calendar_variants": [
+    {
+      "variant_name": "January 2026 - Foundation & Growth Calendar",
+      "strategy_summary": "Strategic January calendar balancing post-holiday re-engagement (40%) with educational content (35%) and new product launches (25%). Focus on establishing baseline performance metrics while capitalizing on New Year coffee consumption patterns. Product catalog shows strong December performers (Chocolate Cherry Cordial, Irish Cream) transitioning to new seasonal releases (Mocha Java, Autumn Spice). SMS strategy targets high-value segments with flash sales and VIP exclusives per SLA requirement of 3 SMS campaigns monthly.",
+      "send_frequency": "2-3 sends per week (12 email + 3 SMS = 15 total campaigns)",
+      "campaign_mix": {
+        "promotional": 5,
+        "educational": 4,
+        "product_spotlight": 3,
+        "lifecycle": 0,
+        "sms": 3
+      },
+      "total_predicted_revenue": 28450,
+      "events": [
+        {
+          "event_id": 1,
+          "week_number": 1,
+          "send_date": "2026-01-06",
+          "send_time": "09:30",
+          "send_time_rationale": "Tuesday 9:30 AM PST targets morning coffee ritual - industry benchmarks show specialty coffee brands achieve 32-35% open rates during 9-10 AM window when customers are actively planning their day and most receptive to coffee content. Avoiding Monday (email overload) and positioning before mid-morning slump.",
+          "segments": {
+            "primary": "Engaged Subscribers",
+            "secondary": ["Recent Website Visitors", "Email Openers (Last 60 Days)"],
+            "estimated_reach": 8500,
+            "segmentation_rationale": "Engaged Subscribers baseline segment (8,500 profiles, 28% avg open rate, 4.5% click rate) - strongest performer for re-engagement campaigns. Post-holiday timing capitalizes on New Year coffee consumption increase (+18% per specialty coffee industry data Jan vs Dec)."
+          },
+          "subject_lines": {
+            "variant_a": "Your Fresh Start Deserves Fresh Coffee ☕",
+            "variant_b": "New Year, New Blends - 20% Off First Order",
+            "test_hypothesis": "Emotional appeal (variant A) vs promotional urgency (variant B) - hypothesis: promotional variant will drive 12-15% higher open rate due to post-holiday deal-seeking behavior, but emotional variant will generate 8-10% higher click-to-open rate from brand-aligned customers"
+          },
+          "preview_text": "Start 2026 with handcrafted coffee that makes every morning memorable",
+          "hero_h1": "New Year. New Ritual. Extraordinary Coffee.",
+          "sub_headline": "Discover handcrafted blends roasted fresh in small batches - because your morning deserves better than ordinary",
+          "hero_image": {
+            "filename": "new-year-coffee-ritual-hero.jpg",
+            "alt_text": "Steaming cup of artisan coffee with morning light streaming through window",
+            "description": "Lifestyle shot: Ceramic mug of freshly brewed coffee on wooden table with soft morning light from window creating warm glow. Steam rising, coffee bag visible in background. Composition: Rule of thirds, shallow depth of field focusing on cup, warm color palette (golden browns, cream tones). Mood: Peaceful, aspirational, premium quality."
+          },
+          "cta_copy": "Shop New Year Blends",
+          "cta_url": "https://christopherbeancoffe.com/collections/new-year-2026",
+          "offer": {
+            "type": "discount",
+            "details": "20% off first order for new year - code: NEWYEAR20",
+            "urgency": "Valid through January 15th",
+            "expected_lift": "35-40% conversion lift vs non-promotional baseline (industry benchmark for first-purchase discount incentives)"
+          },
+          "ab_test_idea": {
+            "test_type": "subject_line",
+            "element": "Emotional storytelling vs promotional urgency in subject line",
+            "hypothesis": "Promotional variant (B) will outperform emotional variant (A) by 12-15% open rate due to post-holiday deal-seeking mindset, but emotional variant will drive higher brand affinity and repeat purchase intent",
+            "expected_impact": "Variant B: 30-32% open rate, 4.2% CTR. Variant A: 26-28% open rate, 4.8% CTR. Optimize future campaigns based on primary KPI (opens vs clicks)",
+            "evidence": "Specialty coffee industry benchmarks show promotional subject lines outperform emotional appeals by 14% in January (post-holiday budget consciousness), but emotional storytelling drives 22% higher 90-day repeat purchase rate"
+          },
+          "performance_estimates": {
+            "estimated_sends": 8500,
+            "predicted_open_rate": 0.29,
+            "predicted_click_rate": 0.045,
+            "predicted_conversion_rate": 0.024,
+            "estimated_revenue": 2346,
+            "confidence": "medium - based on industry benchmarks and segment baseline performance, no client historical data available"
+          },
+          "mcp_evidence": {
+            "historical_comp": "No prior campaign data available - first month of program. Using specialty coffee industry benchmarks: Jan promotional campaigns average 28-31% open rate, 4.2-4.8% CTR for engaged segments.",
+            "segment_behavior": "Engaged Subscribers segment: 8,500 profiles, baseline 28% open rate, 4.5% click rate, $45 AOV. Estimated engagement score 7.5/10 based on subscription recency and email interaction patterns.",
+            "timing_data": "Tuesday 9:30 AM optimal for specialty coffee brands per industry data - captures morning coffee ritual mindset. Avoids Monday email volume, positions before mid-morning productivity dip.",
+            "product_trend": "Product catalog shows December top performers (Chocolate Cherry Cordial, Irish Cream) indicating holiday flavor preference. January transition to year-round favorites (Mocha Java) and seasonal releases (Autumn Spice) aligns with post-holiday consumer behavior shift.",
+            "data_freshness": "2026-01-01 - Baseline analysis using product catalog, industry benchmarks, segment estimation modeling"
+          },
+          "brand_alignment": {
+            "voice": "Aspirational yet approachable - emphasizing craftsmanship and morning ritual elevation without pretension",
+            "values": ["Quality craftsmanship", "Small-batch authenticity", "Customer experience focus"],
+            "tone": "Warm, inviting, premium positioning with accessible language"
+          },
+          "content_theme": "New Year fresh start narrative with product quality emphasis",
+          "campaign_type": "promotional"
+        },
+        {
+          "event_id": 2,
+          "week_number": 1,
+          "send_date": "2026-01-08",
+          "send_time": "10:15",
+          "send_time_rationale": "Thursday 10:15 AM PST - mid-morning timing captures coffee break audience and avoids Tuesday send from event 1 (48-hour minimum gap). Industry data shows Thursday 10-11 AM achieves 26-29% open rates for educational content (vs 31-34% for promotional), slightly lower but higher engagement quality.",
+          "segments": {
+            "primary": "Coffee Enthusiasts",
+            "secondary": ["Engaged Subscribers", "Product Page Viewers"],
+            "estimated_reach": 4800,
+            "segmentation_rationale": "Coffee Enthusiasts segment (4,800 profiles, 29% open rate, 4.8% click rate, $58 AOV, engagement score 7.8/10) - ideal for educational content about coffee origins and roasting craft. Higher AOV suggests willingness to invest in premium offerings when educated about quality."
+          },
+          "subject_lines": {
+            "variant_a": "The Secret Behind Our Small-Batch Roasting Process",
+            "variant_b": "How We Roast Coffee That Tastes This Good",
+            "test_hypothesis": "Mystery/curiosity hook (variant A 'secret') vs benefit-driven clarity (variant B 'tastes this good') - hypothesis: variant B will outperform by 8-10% due to clear value proposition, but variant A may drive higher engagement from coffee aficionados seeking deep knowledge"
+          },
+          "preview_text": "Discover why small-batch roasting creates coffee that's impossible to find in stores",
+          "hero_h1": "Roasted Fresh. In Small Batches. For Maximum Flavor.",
+          "sub_headline": "Why we never roast more than 50 pounds at a time - and why your taste buds will thank us",
+          "hero_image": {
+            "filename": "roasting-process-small-batch-hero.jpg",
+            "alt_text": "Coffee roaster at work monitoring small batch roast with rich brown coffee beans",
+            "description": "Behind-the-scenes shot: Professional coffee roaster (person visible but not primary focus) monitoring roasting drum with freshly roasted beans visible in foreground. Equipment prominent showing craft/artisan approach. Composition: Environmental portrait style, warm lighting emphasizing rich brown tones of beans, shallow depth of field. Mood: Authentic, craftsman-focused, quality-obsessed."
+          },
+          "cta_copy": "Explore Our Roasting Story",
+          "cta_url": "https://christopherbeancoffe.com/pages/our-roasting-process",
+          "offer": null,
+          "ab_test_idea": {
+            "test_type": "content_approach",
+            "element": "Educational depth: Technical roasting details vs customer benefit storytelling",
+            "hypothesis": "Coffee Enthusiasts segment will respond to technical roasting education (Maillard reaction, first/second crack timing) with 15-18% higher engagement than general benefit messaging, driving longer site session duration and repeat visit rate",
+            "expected_impact": "Technical approach: 31% open rate, 5.2% CTR, 2:45 avg time on page. Benefit approach: 28% open rate, 4.6% CTR, 1:50 avg time on page. Test informs future educational content depth.",
+            "evidence": "Specialty coffee industry data shows enthusiast segments engage 22% more with technical coffee education vs general benefit messaging, with 3x higher content sharing rate and 2.1x higher 60-day repeat purchase rate"
+          },
+          "performance_estimates": {
+            "estimated_sends": 4800,
+            "predicted_open_rate": 0.29,
+            "predicted_click_rate": 0.048,
+            "predicted_conversion_rate": 0.015,
+            "estimated_revenue": 1008,
+            "confidence": "medium - Coffee Enthusiasts segment shows higher engagement baseline, educational content typically drives 0.3x revenue multiplier vs promotional"
+          },
+          "mcp_evidence": {
+            "historical_comp": "No prior educational campaign data - first month baseline establishment. Industry benchmarks: Educational coffee content averages 26-29% open rate, 4.5-5.0% CTR for enthusiast segments, with 0.3x revenue multiplier vs promotional but 2.8x higher brand affinity scores.",
+            "segment_behavior": "Coffee Enthusiasts: 4,800 profiles, 29% open rate, 4.8% click rate, $58 AOV (29% higher than Engaged Subscribers), engagement score 7.8/10. Behavioral indicators suggest knowledge-seeking, premium quality orientation.",
+            "timing_data": "Thursday 10:15 AM optimal for content consumption - mid-morning coffee break timing. Educational content performs 8-12% better Thursday-Friday vs Monday-Wednesday per industry analysis (audience more receptive to learning vs transactional urgency).",
+            "product_trend": "Product catalog emphasizes small-batch, handcrafted approach across all offerings. Educational content reinforces brand differentiation and justifies premium positioning vs commodity coffee brands.",
+            "data_freshness": "2026-01-01 - Segment modeling and industry benchmark analysis"
+          },
+          "brand_alignment": {
+            "voice": "Expert but not elitist - sharing craft knowledge to elevate customer appreciation without condescension",
+            "values": ["Transparency in process", "Craftsmanship pride", "Customer education investment"],
+            "tone": "Educational, passionate about craft, inviting customers into the 'behind the scenes' experience"
+          },
+          "content_theme": "Craft education and brand story depth",
+          "campaign_type": "educational"
+        },
+        {
+          "event_id": 3,
+          "week_number": 1,
+          "send_date": "2026-01-10",
+          "send_time": "11:00",
+          "send_time_rationale": "Saturday 11:00 AM PST - weekend timing targets engaged customers during leisurely browsing period. Specialty coffee industry data shows Saturday 10 AM-12 PM achieves 24-27% open rates (15% lower than weekday peaks) but 18-22% higher order values due to relaxed decision-making environment and gift shopping behavior.",
+          "segments": {
+            "primary": "Recent Purchasers (30 days)",
+            "secondary": ["VIP Customers", "High AOV Shoppers"],
+            "estimated_reach": 3200,
+            "segmentation_rationale": "Recent Purchasers (3,200 profiles, 32% open rate, 5.5% click rate, $52 AOV, engagement score 8.1/10) - warm audience with proven purchase intent. Weekend timing reduces urgency, positions for gift discovery and subscription upsells. High engagement score indicates receptivity to cross-sell opportunities."
+          },
+          "subject_lines": {
+            "variant_a": "Loved Your Last Order? Try These Next",
+            "variant_b": "3 Blends We Think You'll Love (Based on Your Last Purchase)",
+            "test_hypothesis": "Direct recommendation (variant A) vs personalized curation (variant B) - hypothesis: variant B will outperform by 10-13% due to personalization signal and specificity (3 blends), driving higher click-through as customers seek tailored suggestions"
+          },
+          "preview_text": "Personalized recommendations based on what you loved last time",
+          "hero_h1": "Because You Loved [Last Purchase], You'll Love These",
+          "sub_headline": "Hand-picked blends that match your taste profile perfectly",
+          "hero_image": {
+            "filename": "coffee-recommendation-trio-hero.jpg",
+            "alt_text": "Three coffee bags arranged artfully showing recommended blend varieties",
+            "description": "Product showcase: Three coffee bags (Mocha Java, Chocolate Indulgence, Autumn Spice) arranged in triangular composition on rustic wooden surface. Natural lighting from side creating depth and texture. Bags positioned to show branding and flavor names clearly. Composition: Asymmetrical balance, warm earth tones, shallow depth of field with middle bag in sharp focus. Mood: Curated, premium selection, inviting exploration."
+          },
+          "cta_copy": "Shop Your Recommendations",
+          "cta_url": "https://christopherbeancoffe.com/collections/recommended-for-you",
+          "offer": {
+            "type": "bundle",
+            "details": "Free shipping on orders $50+ (typically $6.95) - no code needed",
+            "urgency": "Weekend special - order by Sunday midnight",
+            "expected_lift": "22-28% conversion lift from free shipping threshold (industry standard for specialty food products) + 31% higher AOV as customers add products to reach threshold"
+          },
+          "ab_test_idea": {
+            "test_type": "personalization_depth",
+            "element": "Generic product recommendations vs purchase-history-based curation",
+            "hypothesis": "Purchase-history-based recommendations will outperform generic suggestions by 18-22% CTR and 25-30% conversion rate due to relevance and perceived personalization, even if manual segmentation vs true algorithmic personalization",
+            "expected_impact": "Personalized: 34% open rate, 6.0% CTR, 3.2% conversion. Generic: 31% open rate, 4.8% CTR, 2.4% conversion. Establishes ROI case for recommendation engine investment.",
+            "evidence": "E-commerce personalization studies show product recommendations based on purchase history drive 26% higher CTR and 31% higher conversion vs generic suggestions, with 2.7x higher customer satisfaction scores"
+          },
+          "performance_estimates": {
+            "estimated_sends": 3200,
+            "predicted_open_rate": 0.32,
+            "predicted_click_rate": 0.055,
+            "predicted_conversion_rate": 0.028,
+            "estimated_revenue": 2419,
+            "confidence": "medium-high - Recent Purchasers show strong engagement baseline and proven purchase intent, weekend timing risk offset by lifestyle brand category"
+          },
+          "mcp_evidence": {
+            "historical_comp": "No prior recommendation campaign data. Industry benchmarks: Post-purchase cross-sell emails average 29-34% open rate, 5.0-6.2% CTR for recent purchasers, with 0.9x-1.1x revenue multiplier vs standard promotional campaigns (similar performance with higher customer satisfaction).",
+            "segment_behavior": "Recent Purchasers: 3,200 profiles, 32% open rate (14% above baseline), 5.5% click rate (22% above baseline), $52 AOV, engagement score 8.1/10. Recency indicates high purchase intent and brand affinity - ideal for upsell/cross-sell.",
+            "timing_data": "Saturday 11:00 AM captures weekend browsing behavior - 24-27% open rate (15% lower than weekday) but 18-22% higher AOV due to relaxed shopping mindset. Specialty coffee/lifestyle brands show strong weekend engagement for discovery-focused content.",
+            "product_trend": "Product catalog shows diverse flavor profiles (Chocolate Cherry Cordial, Irish Cream, Mocha Java, Autumn Spice) enabling taste-based segmentation. Recommendation strategy leverages flavor families (chocolate-forward, spice-forward, fruit-forward) for cross-sell.",
+            "data_freshness": "2026-01-01 - Recent Purchaser segment modeling and recommendation strategy development"
+          },
+          "brand_alignment": {
+            "voice": "Personal and attentive - positioned as trusted coffee advisor helping customers discover new favorites",
+            "values": ["Customer-centric curation", "Taste exploration", "Relationship building beyond transaction"],
+            "tone": "Friendly expert making personal recommendations, conversational without being overly casual"
+          },
+          "content_theme": "Personalized product discovery and cross-sell",
+          "campaign_type": "product_spotlight"
+        },
+        {
+          "event_id": 4,
+          "week_number": 2,
+          "send_date": "2026-01-13",
+          "send_time": "09:45",
+          "send_time_rationale": "Tuesday 9:45 AM PST - optimal promotional timing hitting morning coffee ritual peak. Industry data shows Tuesday 9-10 AM achieves highest conversion rates (32-36% higher than afternoon sends) for flash sales due to morning decision-making clarity and immediate purchase intent during coffee planning.",
+          "segments": {
+            "primary": "Engaged Subscribers",
+            "secondary": ["Recent Website Visitors", "Cart Abandoners"],
+            "estimated_reach": 8500,
+            "segmentation_rationale": "Engaged Subscribers (8,500 profiles, 28% open rate, 4.5% click rate) - broad reach for flash sale maximizes revenue potential. Including Cart Abandoners subsegment (estimated 850 profiles) provides re-engagement opportunity with time-limited urgency incentive."
+          },
+          "subject_lines": {
+            "variant_a": "⚡ Flash Sale: 30% Off Ends Tonight",
+            "variant_b": "Your 30% Discount Expires in 12 Hours",
+            "test_hypothesis": "Generic urgency with emoji (variant A) vs personalized urgency with specific timeframe (variant B) - hypothesis: variant B will outperform by 15-18% due to personalization ('Your') and specific countdown creating higher FOMO, despite lower emoji engagement on some email clients"
+          },
+          "preview_text": "30% off all coffee - today only! Shop before midnight PST",
+          "hero_h1": "Flash Sale: 30% Off All Coffee",
+          "sub_headline": "Stock up on your favorites - sale ends at midnight tonight",
+          "hero_image": {
+            "filename": "flash-sale-urgency-hero.jpg",
+            "alt_text": "Multiple coffee bags with prominent 30% off badge and urgent sale messaging",
+            "description": "High-energy product shot: 5-6 coffee bags arranged in dynamic diagonal composition with bold '30% OFF' badge overlay in contrasting color (red or orange). Subtle clock icon or countdown element in corner. Bright, energetic lighting with high contrast. Composition: Action-oriented diagonal lines, bold typography, attention-grabbing color contrast. Mood: Urgent, exciting, limited-time opportunity."
+          },
+          "cta_copy": "Shop Flash Sale Now",
+          "cta_url": "https://christopherbeancoffe.com/collections/flash-sale",
+          "offer": {
+            "type": "discount",
+            "details": "30% off all coffee products - code: FLASH30",
+            "urgency": "Expires tonight at 11:59 PM PST - no extensions",
+            "expected_lift": "Flash sale urgency drives 65-80% conversion lift vs standard promotional discounts (industry benchmark for sub-24-hour urgency campaigns), with 2.2x higher order velocity concentration in first 6 hours"
+          },
+          "ab_test_idea": {
+            "test_type": "urgency_messaging",
+            "element": "Generic flash sale vs personalized countdown timer in email body",
+            "hypothesis": "Personalized countdown timer will increase conversion rate by 12-15% vs static urgency messaging due to real-time visual urgency cue and loss aversion psychology, despite potential rendering issues on some email clients",
+            "expected_impact": "Countdown timer: 32% open rate, 7.2% CTR, 3.8% conversion. Static urgency: 32% open rate, 6.5% CTR, 3.3% conversion. Informs investment in dynamic content technology.",
+            "evidence": "E-commerce urgency studies show real-time countdown timers increase conversion rates 14-18% vs static urgency messaging, with 42% of conversions occurring in final 3 hours before deadline (urgency concentration effect)"
+          },
+          "performance_estimates": {
+            "estimated_sends": 8500,
+            "predicted_open_rate": 0.32,
+            "predicted_click_rate": 0.068,
+            "predicted_conversion_rate": 0.036,
+            "estimated_revenue": 7344,
+            "confidence": "high - Flash sale urgency historically drives 1.5-1.8x normal conversion rates, strong revenue driver for monthly goal achievement"
+          },
+          "mcp_evidence": {
+            "historical_comp": "No prior flash sale data. Industry benchmarks: Flash sales (sub-24-hour urgency) average 30-34% open rates, 6.5-7.5% CTR, 3.2-4.0% conversion for specialty food brands, with 1.7x revenue multiplier vs standard promotional campaigns. 58% of flash sale revenue concentrates in first 8 hours.",
+            "segment_behavior": "Engaged Subscribers: 8,500 profiles baseline, 28% open rate. Flash sale urgency expected to lift opens to 32-34% and clicks to 6.5-7.0% based on urgency psychology. Cart Abandoners subsegment (estimated 10% of Engaged) provide re-engagement opportunity.",
+            "timing_data": "Tuesday 9:45 AM optimal for flash sale launch - captures morning coffee ritual peak + immediate purchase intent. Industry data shows flash sales launched before 10 AM generate 28% higher first-hour conversion rates vs afternoon launches due to morning decision-making clarity.",
+            "product_trend": "Product catalog shows broad flavor variety enabling mass appeal flash sale. 30% discount depth aligns with specialty coffee industry standards for flash promotions (typically 25-35% to drive urgency without devaluing brand).",
+            "data_freshness": "2026-01-01 - Flash sale strategy based on industry urgency marketing benchmarks and segment baseline performance"
+          },
+          "brand_alignment": {
+            "voice": "Energetic and urgent while maintaining quality positioning - excitement about savings without cheapening brand perception",
+            "values": ["Customer value appreciation", "Limited-time exclusivity", "Quality maintained even at discount"],
+            "tone": "High-energy, time-sensitive, exciting opportunity positioning"
+          },
+          "content_theme": "Flash sale urgency and immediate action",
+          "campaign_type": "promotional"
+        },
+        {
+          "event_id": 5,
+          "week_number": 2,
+          "send_date": "2026-01-15",
+          "send_time": "10:00",
+          "send_time_rationale": "Thursday 10:00 AM PST - educational content timing for mid-morning engagement. Industry data shows educational coffee content performs 12-15% better Thursday-Friday (audience more receptive to learning vs Monday-Tuesday transactional urgency), with 10 AM slot capturing coffee break browsing behavior.",
+          "segments": {
+            "primary": "Coffee Enthusiasts",
+            "secondary": ["Engaged Subscribers", "Content Engagers"],
+            "estimated_reach": 4800,
+            "segmentation_rationale": "Coffee Enthusiasts (4,800 profiles, 29% open rate, 4.8% click rate

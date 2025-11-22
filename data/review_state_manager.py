@@ -198,6 +198,62 @@ class ReviewStateManager:
             logger.error(f"Failed to update review status: {e}", exc_info=True)
             return False
 
+    def update_review_data(
+        self,
+        workflow_id: str,
+        detailed_calendar: Optional[Dict[str, Any]] = None,
+        simplified_calendar: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Update the calendar data for a workflow review.
+
+        Allows the external app to push back edited calendar data.
+
+        Args:
+            workflow_id: Workflow identifier
+            detailed_calendar: Updated detailed calendar JSON (optional)
+            simplified_calendar: Updated simplified calendar JSON (optional)
+
+        Returns:
+            True if updated successfully, False otherwise
+        """
+        if not self.is_available():
+            logger.warning("Firestore not available. Cannot update review data.")
+            return False
+
+        try:
+            doc_ref = self.db.collection(self.COLLECTION_NAME).document(workflow_id)
+
+            # Check if document exists first
+            doc = doc_ref.get()
+            if not doc.exists:
+                logger.warning(f"Cannot update data: Review state not found for {workflow_id}")
+                return False
+
+            update_data = {
+                "updated_at": datetime.utcnow().isoformat()
+            }
+
+            if detailed_calendar:
+                update_data["detailed_calendar"] = detailed_calendar
+
+            if simplified_calendar:
+                update_data["simplified_calendar"] = simplified_calendar
+
+            # Add metadata about the update
+            current_metadata = doc.to_dict().get("metadata", {})
+            current_metadata["has_external_edits"] = True
+            current_metadata["last_external_edit_at"] = datetime.utcnow().isoformat()
+            update_data["metadata"] = current_metadata
+
+            doc_ref.update(update_data)
+            logger.info(f"Updated review data for workflow: {workflow_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to update review data: {e}", exc_info=True)
+            return False
+
     def list_pending_reviews(
         self,
         client_name: Optional[str] = None,
