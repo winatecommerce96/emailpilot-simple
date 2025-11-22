@@ -206,7 +206,8 @@ class CalendarAgent:
         client_name: str,
         start_date: str,
         end_date: str,
-        workflow_id: str
+        workflow_id: str,
+        user_instructions: Optional[str] = None
     ) -> str:
         """
         Stage 1: Planning - Strategic calendar generation.
@@ -270,6 +271,19 @@ class CalendarAgent:
             logger.warning(f"No product catalog found for {client_name}")
 
         # Build prompt variables
+        # Determine ESP platform context
+        esp_platform = mcp_data.get("esp_platform", "klaviyo")
+        if esp_platform == "braze":
+            esp_context = (
+                "Platform: Braze\n"
+                "LIMITATION: Per-campaign revenue attribution is NOT available via Braze API.\n"
+                "INSTRUCTION: Use aggregate revenue trends and AOV for forecasting. "
+                "Do not invent per-campaign revenue numbers if they are not in the evidence."
+            )
+        else:
+            esp_context = "Platform: Klaviyo (Standard features available)"
+
+        # Build prompt variables
         variables = {
             "client_name": firestore_data.get("display_name", client_name),
             "start_date": start_date,
@@ -277,7 +291,9 @@ class CalendarAgent:
             "mcp_data": mcp_formatted,
             "brand_intelligence": rag_formatted,
             "product_catalog": product_catalog_formatted,
-            "client_config": firestore_formatted
+            "client_config": firestore_formatted,
+            "esp_platform_context": esp_context,
+            "user_instructions": user_instructions or "No specific instructions provided."
         }
 
         # Build system and user prompts
@@ -494,7 +510,8 @@ class CalendarAgent:
         self,
         client_name: str,
         start_date: str,
-        end_date: str
+        end_date: str,
+        user_instructions: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Run the complete three-stage workflow.
@@ -526,7 +543,7 @@ class CalendarAgent:
         try:
             # Stage 1: Planning
             planning_output = await self.stage_1_planning(
-                client_name, start_date, end_date, workflow_id
+                client_name, start_date, end_date, workflow_id, user_instructions
             )
 
             # Stage 2: Structuring

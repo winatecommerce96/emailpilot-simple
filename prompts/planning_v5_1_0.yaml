@@ -229,14 +229,15 @@ user_prompt: |
   12-15 campaigns are recommended to capture holiday opportunities. Ensure comprehensive coverage by
   numbering campaigns 1 through 10 at minimum (ideally 10-15 campaigns, 12-15 for Nov/Dec).
 
+  == USER INSTRUCTIONS (HIGHEST PRIORITY) ==
+  🚨 The following instructions come directly from the user and MUST take precedence over all other guidelines, including RAG data and standard operating procedures:
+  {user_instructions}
+
   == BRAND INTELLIGENCE ANALYSIS ==
-  Brand Voice & Guidelines: {brand_voice_intelligence}
+  {brand_intelligence}
 
-  Content Strategy Pillars: {brand_content_pillars}
-
-  Industry & Competitive Context: {industry_intelligence}
-
-  Compliance & Requirements: {brand_compliance_requirements}
+  == COMPLIANCE & REQUIREMENTS ==
+  {client_config}
 
   == PRODUCT CATALOG (MANDATORY FOR CAMPAIGN CONCEPTS) ==
 
@@ -257,56 +258,35 @@ user_prompt: |
   ✅ PREFER: "Rogue River Blue Seasonal Release", "New Tincture Bundle Launch", "Jefferson Cheddar Pre-Sale"
   ❌ AVOID: "Holiday Gift Guide", "Product Spotlight", "New Arrivals" (unless no specific products exist)
 
-  == ADVANCED SEGMENTATION DATA ==
-  Customer Behavioral Segments: {behavioral_segmentation_data}
-
-  Lifecycle Stage Analysis: {lifecycle_segmentation_data}
-
-  Live Audience Segments: {mcp_segment_data}
-
-  Historical Segment Performance: {segment_performance_history}
-
-  == HISTORICAL PERFORMANCE INTELLIGENCE ==
-  Prior Year Same Period Analysis: {prior_year_campaign_data}
-
-  Recent Performance Trends (60 days): {recent_campaign_performance}
-
-  Content Theme Performance: {content_performance_analysis}
-
-  Timing & Frequency Optimization: {send_time_performance_data}
+  == MCP PERFORMANCE DATA ==
+  {mcp_data}
 
   == CAMPAIGN PLANNING REQUIREMENTS ==
   Planning Period: {start_date} to {end_date}
   Recommended Campaign Volume: 10-15 campaigns (12-15 for Nov/Dec)
-  Monthly Revenue Goal: ${monthly_revenue_goal}
-  Seasonal Revenue Multiplier: {seasonal_multiplier}x
-  Max Sends Per Week: {max_sends_per_week} (×1.5 for Nov/Dec)
-  Max Daily Send Volume: {max_daily_send_volume}
-  Min Days Between Sends: {min_days_between_sends} (1 day for Nov/Dec)
-
+  
   Industry-Specific Considerations:
-  - Apply seasonal patterns specific to {industry_vertical}
+  - Apply seasonal patterns specific to the industry
   - Consider competitive calendar timing and market saturation
   - Align with industry compliance requirements and regulations
   - Optimize for industry-specific buying cycles and decision windows
 
   Brand Voice Enforcement:
-  - Adapt tone, vocabulary, and messaging style from {brand_voice_intelligence}
+  - Adapt tone, vocabulary, and messaging style from Brand Intelligence
   - Ensure every campaign reinforces documented brand positioning
   - Maintain voice consistency across all campaign touchpoints
-  - Reference specific brand guidelines and approved language patterns
 
   Advanced Segmentation Strategy:
-  - Utilize behavioral data: {behavioral_segmentation_data}
-  - Apply lifecycle targeting: {lifecycle_segmentation_data}
-  - Cross-reference with live segments: {mcp_segment_data}
-  - Optimize based on segment performance: {segment_performance_history}
+  - Utilize behavioral data from MCP Data
+  - Apply lifecycle targeting from MCP Data
+  - Cross-reference with live segments
+  - Optimize based on segment performance
 
   Performance-Driven Optimization (MCP DATA USAGE):
-  - Learn from prior year patterns: {prior_year_campaign_data}
-  - Apply recent performance insights: {recent_campaign_performance}
-  - Optimize content themes based on: {content_performance_analysis}
-  - Perfect timing using: {send_time_performance_data}
+  - Learn from prior year patterns
+  - Apply recent performance insights
+  - Optimize content themes based on performance
+  - Perfect timing using send time data
 
   Seasonal Intelligence Application:
   - Extract month from {start_date} to determine seasonal rules
@@ -319,6 +299,7 @@ user_prompt: |
   {esp_platform_context}
 
   == REQUIRED CAMPAIGN SPECIFICATIONS (ALL 13+ FIELDS) ==
+
 
 
   For EACH of the 10-15 campaigns (12-15 for Nov/Dec), please specify:
@@ -577,62 +558,26 @@ variables:
     required: true
     description: "Client identifier and brand name"
 
-  - name: brand_voice_intelligence
-    required: true
-    description: "Comprehensive brand voice guidelines, tone, vocabulary, and messaging patterns extracted from RAG"
-
-  - name: brand_content_pillars
-    required: true
-    description: "Core content themes and strategic pillars that align with brand positioning from RAG"
-
-  - name: industry_intelligence
-    required: true
-    description: "Industry vertical, competitive landscape, and market positioning context from RAG"
-
-  - name: brand_compliance_requirements
+  - name: user_instructions
     required: false
-    description: "Legal, regulatory, or internal compliance constraints from RAG"
-    default_value: "No specific compliance requirements identified"
+    default_value: "No specific instructions provided."
+    description: "Direct instructions from the user that override other guidelines"
+
+  - name: brand_intelligence
+    required: true
+    description: "Aggregated brand voice, content pillars, and industry context from RAG"
+
+  - name: mcp_data
+    required: true
+    description: "Aggregated MCP performance data including segments, campaigns, and reports"
+
+  - name: client_config
+    required: true
+    description: "Client configuration and compliance requirements from Firestore"
 
   - name: product_catalog
     required: true
-    description: "Complete product catalog from RAG with specific product names, pricing, seasonal availability, SKUs, and awards - MUST be used for campaign concept generation to ensure product-specific (not generic) campaigns"
-
-  - name: behavioral_segmentation_data
-    required: true
-    description: "Customer behavioral analysis including RFM scoring, engagement patterns, and purchase behavior from MCP"
-
-  - name: lifecycle_segmentation_data
-    required: true
-    description: "Customer lifecycle stages, journey progression, and lifecycle-based targeting from MCP"
-
-  - name: mcp_segment_data
-    required: true
-    description: "Live audience segments with current sizes and criteria from MCP get_segments call"
-
-  - name: segment_performance_history
-    required: true
-    description: "Historical performance data by segment including open rates, click rates, and conversion metrics"
-
-  - name: prior_year_campaign_data
-    required: true
-    description: "Campaign performance data from the same period in the prior year for seasonal comparison"
-
-  - name: recent_campaign_performance
-    required: true
-    description: "Last 60 days of campaign performance data including trends and patterns"
-
-  - name: content_performance_analysis
-    required: true
-    description: "Performance analysis by content theme, subject line patterns, and creative approaches"
-
-  - name: send_time_performance_data
-    required: true
-    description: "Optimal send time analysis by segment, day of week, and time of day performance"
-
-  - name: industry_vertical
-    required: true
-    description: "Specific industry classification for targeted seasonal and competitive intelligence"
+    description: "Complete product catalog from RAG"
 
   - name: start_date
     required: true
@@ -642,39 +587,35 @@ variables:
     required: true
     description: "Campaign planning period end date"
 
-  - name: min_events
-    required: false
-    default_value: 10
-    description: "Minimum number of campaigns to generate (recommended minimum for quality)"
-
-  - name: max_events
-    required: false
-    default_value: 15
-    description: "Maximum number of campaigns to generate"
-
   - name: monthly_revenue_goal
     required: true
-    description: "Monthly revenue target for this client (used for goal validation)"
+    description: "Monthly revenue target for this client"
 
   - name: seasonal_multiplier
     required: false
     default_value: "1.0"
-    description: "Seasonal revenue multiplier (3-5x for Nov/Dec, 1.0 for standard months)"
+    description: "Seasonal revenue multiplier"
 
   - name: max_sends_per_week
     required: false
     default_value: 3
-    description: "Maximum sends per week (×1.5 for Nov/Dec)"
+    description: "Maximum sends per week"
 
   - name: max_daily_send_volume
     required: false
     default_value: 100000
-    description: "Maximum sends per day (throttling limit)"
+    description: "Maximum sends per day"
 
   - name: min_days_between_sends
     required: false
     default_value: 2
-    description: "Minimum days between sends (1 for Nov/Dec)"
+    description: "Minimum days between sends"
+
+  - name: esp_platform_context
+    required: false
+    default_value: "Platform: Klaviyo (Standard features available)"
+    description: "Specific instructions or limitations for the ESP platform"
+
 
 last_modified_by: tech_lead_orchestrator
 use_case_tags:
