@@ -205,6 +205,7 @@ class NativeMCPClient:
         self.config_path = config_path or os.path.join(os.path.expanduser("~"), ".mcp.json")
         self.secret_manager_client = secretmanager.SecretManagerServiceClient()
         self.servers: Dict[str, MCPServerProcess] = {}
+        self.clients_data: Dict[str, Any] = {}
         self._initialized = False
 
     async def __aenter__(self):
@@ -278,6 +279,15 @@ class NativeMCPClient:
                 response = await client.get(self.clients_api_url)
                 response.raise_for_status()
                 clients = response.json()
+            
+            # Cache client data for later use (e.g. affinity segments)
+            self.clients_data = {c.get('slug'): c for c in clients}
+            # Also map by ID just in case
+            for c in clients:
+                if c.get('id'):
+                    self.clients_data[c.get('id')] = c
+                if c.get('client_id'):
+                    self.clients_data[c.get('client_id')] = c
 
             configs = []
 
@@ -548,6 +558,25 @@ class NativeMCPClient:
             "lists": lists_data,
             "catalog_items": catalog_items
         }
+
+        # Inject affinity and universal segments from cached client data
+        if hasattr(self, 'clients_data') and client_name in self.clients_data:
+            client_data = self.clients_data[client_name]
+            
+            # Check metadata for affinity_segments (where we found them in debug)
+            metadata = client_data.get('metadata', {})
+            if 'affinity_segments' in metadata:
+                result['affinity_segments'] = metadata['affinity_segments']
+                logger.info(f"✅ Injected {len(result['affinity_segments'])} affinity segments from metadata")
+            elif 'affinity_segments' in client_data:
+                result['affinity_segments'] = client_data['affinity_segments']
+                logger.info(f"✅ Injected {len(result['affinity_segments'])} affinity segments from client root")
+            
+            # Check for universal_segments
+            if 'universal_segments' in metadata:
+                result['universal_segments'] = metadata['universal_segments']
+            elif 'universal_segments' in client_data:
+                result['universal_segments'] = client_data['universal_segments']
 
         logger.info(
             f"MCP data fetch complete for {client_name}: "

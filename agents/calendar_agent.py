@@ -208,7 +208,7 @@ class CalendarAgent:
         end_date: str,
         workflow_id: str,
         user_instructions: Optional[str] = None
-    ) -> str:
+    ) -> tuple[str, list[str]]:
         """
         Stage 1: Planning - Strategic calendar generation.
 
@@ -222,7 +222,7 @@ class CalendarAgent:
             workflow_id: Unique workflow identifier
 
         Returns:
-            Planning output (strategic calendar in text format)
+            Tuple of (Planning output text, List of warning messages)
         """
         logger.info(f"Stage 1: Planning for {client_name} ({start_date} to {end_date})")
 
@@ -245,8 +245,21 @@ class CalendarAgent:
         rag_data = self.rag.get_all_data(client_name)
         firestore_data = self.firestore.get_all_data(client_name)
 
+        # Generate Data Quality Warnings
+        warnings = []
+
+        # RAG Data Check
+        # Check if brand_voice is missing or looks like a default/empty placeholder
+        if not rag_data or not rag_data.get("brand_voice") or len(str(rag_data.get("brand_voice", ""))) < 50:
+            warnings.append("The calendar will improve significantly if you upload more client context (RAG).")
+
+        # MCP Data Check
+        # Check if campaigns are missing
+        if not mcp_data or not mcp_data.get("campaigns"):
+            warnings.append("Because the API information is not provided I was not able to use historical data. Please add it to the settings to improve calendar quality.")
+
         # Load planning prompt
-        planning_prompt = self.load_prompt("planning_v5_1_0.yaml")
+        planning_prompt = self.load_prompt("planning_v5_2_0.yaml")
 
         # Format data for prompt
         mcp_formatted = self._format_mcp_data(mcp_data)
@@ -309,7 +322,7 @@ class CalendarAgent:
 
         logger.info(f"Stage 1: Planning complete ({len(planning_output)} characters)")
 
-        return planning_output
+        return planning_output, warnings
 
     async def stage_2_structuring(
         self,
@@ -542,7 +555,7 @@ class CalendarAgent:
 
         try:
             # Stage 1: Planning
-            planning_output = await self.stage_1_planning(
+            planning_output, warnings = await self.stage_1_planning(
                 client_name, start_date, end_date, workflow_id, user_instructions
             )
 
@@ -550,6 +563,27 @@ class CalendarAgent:
             calendar_json = await self.stage_2_structuring(
                 client_name, start_date, end_date, workflow_id, planning_output
             )
+
+            # Stage 2.5: SMS Generation (New)
+            # Check if SMS is required based on client config (SLA)
+            # For now, we'll check if sms_count_required is in client_config or default to 0
+            # In a real implementation, this would come from Firestore client config
+            # We'll assume a default of 4 for testing if not specified
+            sms_count = 4  # Default SLA requirement
+            
+            # Try to get from Firestore data if available
+            try:
+                firestore_data = self.firestore.get_all_data(client_name)
+                if firestore_data and "sla" in firestore_data:
+                    sms_count = firestore_data["sla"].get("sms_count", 4)
+            except Exception as e:
+                logger.warning(f"Could not fetch SLA from Firestore, using default SMS count: {e}")
+
+            if sms_count > 0:
+                logger.info(f"Generating {sms_count} SMS campaigns (SLA requirement)")
+                calendar_json = await self.stage_2_5_sms_generation(
+                    client_name, start_date, end_date, workflow_id, calendar_json, sms_count
+                )
 
             # Stage 3: Brief Generation
             briefs_output = await self.stage_3_briefs(
@@ -559,6 +593,7 @@ class CalendarAgent:
             # Compile final output
             result = {
                 "planning": planning_output,
+                "warnings": warnings,
                 "calendar_json": calendar_json,
                 "briefs": briefs_output,
                 "metadata": {
@@ -577,6 +612,137 @@ class CalendarAgent:
         except Exception as e:
             logger.error(f"Workflow {workflow_id} failed: {str(e)}")
             raise
+
+    async def stage_2_5_sms_generation(
+        self,
+        client_name: str,
+        start_date: str,
+        end_date: str,
+        workflow_id: str,
+        calendar_json: Dict[str, Any],
+        sms_count_required: int
+    ) -> Dict[str, Any]:
+        """
+        Stage 2.5: SMS Generation - Generate standalone SMS campaigns.
+
+        Args:
+            client_name: Client slug
+            start_date: Start date
+            end_date: End date
+            workflow_id: Workflow ID
+            calendar_json: Calendar JSON from Stage 2
+            sms_count_required: Number of SMS campaigns to generate
+
+        Returns:
+            Updated calendar JSON with SMS campaigns added
+        """
+        logger.info(f"Stage 2.5: SMS Generation for {client_name} ({sms_count_required} campaigns)")
+
+        try:
+            # Load SMS prompt
+            sms_prompt = self.load_prompt("sms_generation_v1_0_0.yaml")
+
+            # Prepare context summaries
+            # 1. Email Campaigns Summary
+            email_campaigns = calendar_json.get("events", [])
+            email_summary = []
+            for event in email_campaigns:
+                email_summary.append(
+                    f"- Date: {event.get('send_date')} | Theme: {event.get('content_theme')} | "
+                    f"Segment: {event.get('segments', {}).get('primary')} | "
+                    f"Offer: {event.get('offer', {}).get('details', 'None')}"
+                )
+            email_summary_str = "\n".join(email_summary)
+
+            # 2. RAG Data Summaries
+            rag_data = self.rag.get_all_data(client_name)
+            
+            brand_voice = rag_data.get("brand_voice", "Professional and engaging.")
+            if isinstance(brand_voice, dict):
+                brand_voice = json.dumps(brand_voice)
+                
+            product_catalog = rag_data.get("product_catalog", "No specific products.")
+            if isinstance(product_catalog, dict):
+                product_catalog = json.dumps(product_catalog)
+                
+            target_audience = rag_data.get("target_audience", "General audience.")
+            if isinstance(target_audience, dict):
+                target_audience = json.dumps(target_audience)
+
+            # Build prompt variables
+            variables = {
+                "client_name": client_name,
+                "sms_count_required": sms_count_required,
+                "start_date": start_date,
+                "end_date": end_date,
+                "email_campaigns_summary": email_summary_str,
+                "brand_voice_summary": str(brand_voice)[:1000],  # Truncate if too long
+                "product_catalog_summary": str(product_catalog)[:1000],
+                "target_audience_summary": str(target_audience)[:1000]
+            }
+
+            # Build system and user prompts
+            system_prompt = self._build_system_prompt(sms_prompt)
+            user_prompt = self._build_user_prompt(sms_prompt, variables)
+
+            # Call Claude
+            sms_output = await self._call_claude(
+                system_prompt,
+                user_prompt,
+                max_tokens=4000
+            )
+
+            logger.info(f"SMS Generation complete ({len(sms_output)} characters)")
+
+            # Parse JSON output
+            # json and re are already imported at module level or should be used from there
+            # re needs to be imported if not already
+            import re
+            
+            # Extract JSON from markdown
+            json_str = sms_output.strip()
+            if "```json" in json_str:
+                json_str = json_str.split("```json")[1].split("```")[0].strip()
+            elif "```" in json_str:
+                json_str = json_str.split("```")[1].split("```")[0].strip()
+                
+            sms_data = json.loads(json_str)
+            
+            # Merge SMS campaigns into calendar
+            sms_campaigns = sms_data.get("sms_campaigns", [])
+            
+            if sms_campaigns:
+                logger.info(f"Merging {len(sms_campaigns)} SMS campaigns into calendar")
+                
+                # Get max event_id to continue numbering
+                max_id = 0
+                for event in calendar_json.get("events", []):
+                    try:
+                        eid = int(event.get("event_id", 0))
+                        max_id = max(max_id, eid)
+                    except:
+                        pass
+                
+                # Add SMS campaigns
+                for sms in sms_campaigns:
+                    max_id += 1
+                    # Convert SMS format to Event format if needed, or append as is
+                    # The prompt output format matches the event structure mostly
+                    sms["event_id"] = max_id
+                    sms["channel"] = "sms" # Explicitly mark as SMS channel
+                    calendar_json["events"].append(sms)
+                    
+                # Update strategy summary
+                if "calendar_strategy_summary" in calendar_json:
+                    calendar_json["calendar_strategy_summary"]["sms_campaigns_count"] = len(sms_campaigns)
+            
+            return calendar_json
+
+        except Exception as e:
+            logger.error(f"SMS Generation failed: {str(e)}")
+            # Return original calendar if SMS generation fails
+            # Don't fail the whole workflow for this
+            return calendar_json
 
     def _format_mcp_data(self, mcp_data: Optional[Dict[str, Any]]) -> str:
         """
@@ -601,6 +767,22 @@ class CalendarAgent:
             segments_count = len(mcp_data["segments"])
             sections.append(f"## Segments ({segments_count} total)\n\n" +
                           json.dumps(mcp_data["segments"], indent=2))
+
+        # Affinity Segments (Client Specific)
+        if mcp_data.get("affinity_segments"):
+            affinity_count = len(mcp_data["affinity_segments"])
+            sections.append(f"## 🎯 CLIENT-SPECIFIC AFFINITY SEGMENTS ({affinity_count} total)\n"
+                          "These are high-priority segments based on product preferences and behavior.\n"
+                          "USE THESE for product-focused campaigns.\n\n" +
+                          json.dumps(mcp_data["affinity_segments"], indent=2))
+
+        # Universal Segments
+        if mcp_data.get("universal_segments"):
+            universal_count = len(mcp_data["universal_segments"])
+            sections.append(f"## 🌍 UNIVERSAL SEGMENTS ({universal_count} total)\n"
+                          "Standard behavioral segments available for all clients.\n"
+                          "USE THESE for behavioral targeting (winback, engagement).\n\n" +
+                          json.dumps(mcp_data["universal_segments"], indent=2))
 
         # Campaigns
         if mcp_data.get("campaigns"):

@@ -18,6 +18,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
@@ -60,6 +61,7 @@ class WorkflowRequest(BaseModel):
     clientName: str
     startDate: str
     endDate: str
+    userInstructions: Optional[str] = None  # User-provided context and requirements
 
 
 class PromptUpdateRequest(BaseModel):
@@ -167,6 +169,15 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:8000", "http://127.0.0.1:8000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Mount static files
 static_dir = Path(__file__).parent / "static"
 static_dir.mkdir(exist_ok=True)
@@ -264,6 +275,7 @@ async def run_workflow(request: WorkflowRequest, background_tasks: BackgroundTas
                 client_name=client_name,
                 start_date=start_date,
                 end_date=end_date,
+                user_instructions=request.userInstructions,
                 save_outputs=True
             )
 
@@ -290,7 +302,8 @@ async def run_workflow(request: WorkflowRequest, background_tasks: BackgroundTas
                 stage=stage_num,
                 client_name=client_name,
                 start_date=start_date,
-                end_date=end_date
+                end_date=end_date,
+                user_instructions=request.userInstructions
             )
 
             return standard_response(
@@ -318,7 +331,7 @@ async def get_prompt(prompt_name: str):
 
     # Map friendly names to actual filenames
     prompt_files = {
-        "planning": "planning_v5_1_0.yaml",
+        "planning": "planning_v5_2_0.yaml",
         "structuring": "calendar_structuring_v1_2_2.yaml",
         "briefs": "brief_generation_v2_2_0.yaml"
     }
