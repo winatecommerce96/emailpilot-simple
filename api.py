@@ -371,7 +371,7 @@ async def update_prompt(prompt_name: str, request: PromptUpdateRequest):
     prompts_dir = Path(__file__).parent / "prompts"
 
     prompt_files = {
-        "planning": "planning_v5_1_0.yaml",
+        "planning": "planning_v5_2_0.yaml",
         "structuring": "calendar_structuring_v1_2_2.yaml",
         "briefs": "brief_generation_v2_2_0.yaml"
     }
